@@ -8,6 +8,10 @@
 
 **Tiếng Việt** · [English](README.en.md)
 
+### [Tải về MacViewer cho macOS](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg)
+
+Bản mới nhất, file DMG, macOS 14 trở lên · [Xem các phiên bản](https://github.com/DeanOpen/MacViewer/releases/latest)
+
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -20,7 +24,7 @@
 
 ---
 
-UltraViewer chỉ có bản cho Windows. MacViewer là ứng dụng macOS thuần, giúp
+[UltraViewer](https://ultraviewer.net/vi/) chỉ có bản cho Windows. MacViewer là ứng dụng macOS thuần, giúp
 bạn kết nối tới máy đang chạy UltraViewer (hoặc MacViewer), và cho phép người
 khác điều khiển máy Mac của bạn khi bạn đồng ý. Ứng dụng viết bằng
 SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào của Windows.
@@ -68,10 +72,15 @@ khi điều khiển, và chế độ màu 8-bit.
 
 ## Cài đặt
 
-1. Tải file `MacViewer-<phiên bản>.dmg` mới nhất ở trang
-   [**Releases**](https://github.com/DeanOpen/MacViewer/releases/latest).
+1. [**Tải về MacViewer.dmg**](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg) (bản mới nhất), hoặc chọn phiên bản
+   khác ở trang [Releases](https://github.com/DeanOpen/MacViewer/releases/latest).
 2. Mở file DMG, kéo **MacViewer** thả vào thư mục **Applications**.
 3. Mở MacViewer từ Launchpad hoặc thư mục Applications.
+
+Khi có bản mới, MacViewer hiện nút **Cập nhật lên …** trên thanh tiêu đề. Bấm
+vào, xem có gì mới, rồi bấm **Cập nhật và khởi động lại**: ứng dụng tự tải về,
+kiểm tra chữ ký, cài đặt và mở lại. Bạn cũng có thể chọn **MacViewer → Kiểm tra
+bản cập nhật…** trên thanh menu.
 
 Nếu macOS báo không mở được ứng dụng, hãy nhấp chuột phải vào MacViewer, chọn
 **Open** rồi bấm **Open** lần nữa. Hoặc chạy lệnh:
@@ -134,7 +143,8 @@ Mọi issue và pull request đều được chào đón. Trước khi gửi PR,
 
 ## Quyền riêng tư
 
-MacViewer không thu thập bất kỳ dữ liệu nào. Mật khẩu chỉ được lưu khi bạn chọn
+MacViewer không thu thập bất kỳ dữ liệu nào. Khi kiểm tra bản cập nhật, ứng dụng
+chỉ đọc thông tin phiên bản công khai trên GitHub (có thể tắt trong Cài đặt). Mật khẩu chỉ được lưu khi bạn chọn
 ghi nhớ, và chỉ lưu trong Keychain của macOS. Lịch sử kết nối chỉ lưu ID, không
 bao giờ lưu mật khẩu.
 

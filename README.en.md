@@ -8,6 +8,10 @@
 
 [Tiếng Việt](README.md) · **English**
 
+### [Download MacViewer for macOS](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg)
+
+Latest version, DMG, macOS 14 or later · [All releases](https://github.com/DeanOpen/MacViewer/releases/latest)
+
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -20,7 +24,7 @@
 
 ---
 
-MacViewer connects to other computers running **UltraViewer** (or MacViewer)
+MacViewer connects to other computers running [**UltraViewer**](https://ultraviewer.net) (or MacViewer)
 and accepts approved connections from them. It's built with SwiftUI and AppKit on
 top of a Swift/C protocol engine. It doesn't use Wine, and it doesn't run any
 Windows executable code.
@@ -69,8 +73,8 @@ non-US keyboard layouts/IME and 8-bit screen mode haven't been validated.
 
 ## Installation
 
-1. Download the latest `MacViewer-<version>.dmg` (or `.zip`) from
-   [**Releases**](https://github.com/DeanOpen/MacViewer/releases/latest).
+1. [**Download MacViewer.dmg**](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg) (latest version), or pick another
+   version on the [Releases](https://github.com/DeanOpen/MacViewer/releases/latest) page.
 2. Open the DMG and drag **MacViewer** into **Applications**.
 3. If the release isn't notarized, macOS will block the first launch. Right-click
    the app, choose **Open**, then confirm. You can also run:
@@ -78,6 +82,11 @@ non-US keyboard layouts/IME and 8-bit screen mode haven't been validated.
    ```sh
    xattr -dr com.apple.quarantine /Applications/MacViewer.app
    ```
+
+MacViewer shows an **Update to …** button in its title bar when a new version
+is out. Click it, read what's new, then click **Update and Restart**: the app
+downloads the update, checks its signature, installs it and reopens. You can
+also choose **MacViewer → Check for Updates…** from the menu bar.
 
 ## Usage
 
@@ -132,7 +141,8 @@ Issues and pull requests are welcome. Before you open a PR, please:
 
 ## Privacy
 
-MacViewer doesn't collect telemetry. Passwords are saved only when you choose
+MacViewer doesn't collect telemetry. The update check only reads public
+release information from GitHub, and you can turn it off in Settings. Passwords are saved only when you choose
 to remember them, and only in the macOS Keychain. They're never written to
 recent-partner history, UserDefaults or registration profiles.
 
