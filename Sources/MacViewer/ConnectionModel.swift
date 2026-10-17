@@ -209,6 +209,12 @@ final class ConnectionModel: ObservableObject {
         password = ""
     }
 
+    /// Disconnects and waits until the remote computer has been told.
+    func shutdown() async {
+        disconnect()
+        await adapter.waitUntilClosed()
+    }
+
     func setControlEnabled(_ enabled: Bool) {
         guard phase == .connected, remoteInfo?.allowsRemoteInput == true else { return }
         if enabled {

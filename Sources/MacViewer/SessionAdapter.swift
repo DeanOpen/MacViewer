@@ -21,6 +21,8 @@ protocol MacViewerSessionAdapter: AnyObject {
     func setClipboardSharing(_ enabled: Bool) async throws
     func setComputerAudioEnabled(_ enabled: Bool) async throws
     func disconnect()
+    /// Waits until the goodbye and socket close started by `disconnect()` finish.
+    func waitUntilClosed() async
 }
 
 extension MacViewerSessionAdapter {
@@ -32,6 +34,7 @@ extension MacViewerSessionAdapter {
     func sendClipboard(_ text: String) async throws { throw NativeSessionError.unavailable("Clipboard sharing is unavailable for this connection.") }
     func setClipboardSharing(_ enabled: Bool) async throws { throw NativeSessionError.unavailable("Clipboard sharing is unavailable for this connection.") }
     func setComputerAudioEnabled(_ enabled: Bool) async throws { throw NativeSessionError.unavailable("Computer audio is unavailable for this connection.") }
+    func waitUntilClosed() async {}
 }
 
 enum SessionAvailability: Equatable {

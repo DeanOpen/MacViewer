@@ -41,6 +41,13 @@ import Testing
     }
 }
 
+@Test func viewerEndSessionMatchesTheWindowsViewerGoodbye() {
+    // The Windows viewer's last peer message is command19; the host session
+    // parser reads the tag before any field separator.
+    #expect(RemoteControlCommands.endSession.payload == Data("19".utf8))
+    #expect(!RemoteControlCommands.endSession.formatFlag)
+}
+
 @Test func remoteMonitorsDecodeNativeTrailingSeparatorAndNegativeOrigins() throws {
     let monitors = try RemoteControlCommands.monitors(from: Data("-1920:0:0:1080|0:-200:2560:1240|".utf8))
     #expect(monitors.count == 2)

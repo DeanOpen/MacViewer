@@ -30,6 +30,7 @@ final class MacHostingModel: ObservableObject {
     private var captureTask: Task<Void, Never>?
     private var controlTask: Task<Void, Never>?
     private var sideSwitchTask: Task<Void, Never>?
+    private var stopping: Task<Void, Never>?
     private var generation = UUID()
     private var captureGeneration = UUID()
     private var controlGeneration = UUID()
@@ -304,7 +305,17 @@ final class MacHostingModel: ObservableObject {
         phase = .off; identifier = nil; password = ""
         pendingRequest = nil; viewer = nil; allowsControl = false; isApproving = false
         status = "Incoming access is paused."
-        Task { await session?.stop() }
+        let previous = stopping
+        stopping = Task {
+            await previous?.value
+            await session?.stop()
+        }
+    }
+
+    /// Stops sharing and waits until a connected viewer has been told.
+    func shutdown() async {
+        stop()
+        await stopping?.value
     }
 
     private func cancelControlUpdate() {

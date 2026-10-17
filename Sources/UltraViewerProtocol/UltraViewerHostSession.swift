@@ -168,7 +168,11 @@ public actor UltraViewerHostSession {
         guard peer?.request.id == session else { return }
         await endViewer(reason: "The Mac screen is no longer available.")
     }
-    public func stop() async { await finish(nil) }
+    /// Ends any connected viewer first so it is told the session is over.
+    public func stop() async {
+        if running, peer != nil { await endViewer() }
+        await finish(nil)
+    }
 
     public func sendChat(_ text: String, session: UUID) async throws {
         guard peerPhase == .streaming, let peer, peer.request.id == session else { throw Failure.notConnected }

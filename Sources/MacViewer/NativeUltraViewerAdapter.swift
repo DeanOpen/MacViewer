@@ -13,6 +13,7 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
     private var peer: UltraViewerRelaySession.Peer?
     private var allowsInput = false
     private var generation = UUID()
+    private var closing: Task<Void, Never>?
 
     func connect(partnerID: String, password: String) async throws
         -> AsyncThrowingStream<RemoteSessionEvent, Error> {
@@ -157,7 +158,9 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
         let releases = encoder?.encode(.releaseAll) ?? []
         engine = nil; reader = nil; encoder = nil; peer = nil; allowsInput = false
         output?.finish(); output = nil
-        Task {
+        let previous = closing
+        closing = Task {
+            await previous?.value
             if let oldEngine {
                 for payload in releases { try? await oldEngine.send(payload) }
                 await oldEngine.close()
@@ -165,4 +168,6 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
             oldReader?.cancel()
         }
     }
+
+    func waitUntilClosed() async { await closing?.value }
 }

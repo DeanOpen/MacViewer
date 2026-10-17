@@ -215,7 +215,14 @@ public actor UltraViewerRelaySession {
         try await login(controlMode: -1, clearControlMode: true, token: token)
     }
 
-    public func close() async { await finish(nil) }
+    /// Tells an active host that this viewer is leaving, then closes.
+    public func close() async {
+        if phase == .active {
+            let message = RemoteControlCommands.endSession
+            try? await sendToPeer(message.payload, formatFlag: message.formatFlag)
+        }
+        await finish(nil)
+    }
 
     public func sendChat(_ text: String) async throws {
         guard phase == .active else { throw Failure.notConnected }

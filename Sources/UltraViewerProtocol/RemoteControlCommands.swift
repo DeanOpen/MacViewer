@@ -64,6 +64,11 @@ public enum RemoteControlCommands {
     /// offering audio as a working feature; this method supplies no media path.
     public static func computerSound(enabled: Bool) -> Message { unicode("46|||\(enabled ? -1 : 0)") }
 
+    /// A Windows viewer sends command19 as its last peer message when it
+    /// leaves; the host ends the session on receipt instead of waiting for a
+    /// relay timeout.
+    public static var endSession: Message { ascii("19") }
+
     /// Sends the currently hosted local ID/PIN to the authenticated Windows
     /// host. The caller must explicitly approve this credential disclosure.
     public static func sideSwitch(ownID: String, password: String) throws -> Message {
