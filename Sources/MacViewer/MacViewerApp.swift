@@ -18,7 +18,7 @@ struct MacViewerApp: App {
                     applicationDelegate.capture = capture
                     applicationDelegate.model = model
                     applicationDelegate.hosting = hosting
-                    updater.checkAutomatically()
+                    updater.startAutomaticChecks()
                 }
                 .appLanguage()
         }
@@ -39,7 +39,7 @@ struct MacViewerApp: App {
         }
 
         Settings {
-            MacViewerSettings(model: model).appLanguage()
+            MacViewerSettings(model: model, updater: updater).appLanguage()
         }
     }
 }
@@ -47,6 +47,7 @@ struct MacViewerApp: App {
 struct MacViewerSettings: View {
     private static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     @ObservedObject var model: ConnectionModel
+    @ObservedObject var updater: UpdateChecker
     @AppStorage(ConnectionModel.rememberPartnersKey) private var rememberPartners = true
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
@@ -91,6 +92,8 @@ struct MacViewerSettings: View {
             Section("About") {
                 LabeledContent("Application", value: "MacViewer \(Self.version)")
                 Toggle("Automatically check for updates", isOn: $checkForUpdates)
+                Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
+                    .disabled(updater.state == .checking)
                 Text("An independent native Mac app for UltraViewer interoperability.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

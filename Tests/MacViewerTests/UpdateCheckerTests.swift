@@ -43,15 +43,13 @@ import Testing
 }
 
 @MainActor
-@Test func automaticUpdateChecksRespectTheSettingAndDailyLimit() throws {
-    let defaults = try #require(UserDefaults(suiteName: "UpdateCheckerTests-\(UUID().uuidString)"))
+@Test func automaticUpdateChecksRespectTheSetting() throws {
+    let suite = "UpdateCheckerTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
     let checker = UpdateChecker(currentVersion: "0.3.2", defaults: defaults)
     defaults.set(false, forKey: UpdateChecker.automaticKey)
     checker.checkAutomatically()
-    #expect(checker.state == .idle)
-    defaults.set(true, forKey: UpdateChecker.automaticKey)
-    defaults.set(Date(), forKey: UpdateChecker.lastCheckKey)
-    checker.checkAutomatically(now: Date().addingTimeInterval(60 * 60))
     #expect(checker.state == .idle)
 }
 

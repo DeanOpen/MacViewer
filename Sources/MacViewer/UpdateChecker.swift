@@ -36,6 +36,7 @@ final class UpdateChecker: ObservableObject {
     let currentVersion: String
     private let defaults: UserDefaults
     private var task: Task<Void, Never>?
+    private var automaticTask: Task<Void, Never>?
 
     init(currentVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
          defaults: UserDefaults = .standard) {
@@ -51,10 +52,19 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
-    /// Runs at launch at most once a day, unless turned off in Settings.
-    func checkAutomatically(now: Date = Date()) {
-        guard defaults.bool(forKey: Self.automaticKey) else { return }
-        if let last = defaults.object(forKey: Self.lastCheckKey) as? Date, now.timeIntervalSince(last) < 24 * 60 * 60 { return }
+    /// Checks at launch and every few hours while running, unless turned off in Settings.
+    func startAutomaticChecks(every interval: Duration = .seconds(4 * 60 * 60)) {
+        guard automaticTask == nil else { return }
+        automaticTask = Task {
+            while !Task.isCancelled {
+                checkAutomatically()
+                try? await Task.sleep(for: interval)
+            }
+        }
+    }
+
+    func checkAutomatically() {
+        guard defaults.bool(forKey: Self.automaticKey), availableRelease == nil else { return }
         check(userInitiated: false)
     }
 
