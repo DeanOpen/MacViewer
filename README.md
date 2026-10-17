@@ -8,9 +8,9 @@
 
 **Tiếng Việt** · [English](README.en.md)
 
-### [Tải về MacViewer cho macOS](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg)
+### [Tải về MacViewer cho macOS](https://github.com/DeanOpen/MacViewer/releases/latest)
 
-Bản mới nhất, file DMG, macOS 14 trở lên · [Xem các phiên bản](https://github.com/DeanOpen/MacViewer/releases/latest)
+Bản mới nhất, macOS 14 trở lên
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -72,8 +72,7 @@ khi điều khiển, và chế độ màu 8-bit.
 
 ## Cài đặt
 
-1. [**Tải về MacViewer.dmg**](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg) (bản mới nhất), hoặc chọn phiên bản
-   khác ở trang [Releases](https://github.com/DeanOpen/MacViewer/releases/latest).
+1. Vào trang [**Tải về**](https://github.com/DeanOpen/MacViewer/releases/latest) và tải file `MacViewer-<phiên bản>.dmg`.
 2. Mở file DMG, kéo **MacViewer** thả vào thư mục **Applications**.
 3. Mở MacViewer từ Launchpad hoặc thư mục Applications.
 

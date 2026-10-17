@@ -8,9 +8,9 @@
 
 [Tiếng Việt](README.md) · **English**
 
-### [Download MacViewer for macOS](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg)
+### [Download MacViewer for macOS](https://github.com/DeanOpen/MacViewer/releases/latest)
 
-Latest version, DMG, macOS 14 or later · [All releases](https://github.com/DeanOpen/MacViewer/releases/latest)
+Latest version, macOS 14 or later
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -73,8 +73,7 @@ non-US keyboard layouts/IME and 8-bit screen mode haven't been validated.
 
 ## Installation
 
-1. [**Download MacViewer.dmg**](https://github.com/DeanOpen/MacViewer/releases/latest/download/MacViewer.dmg) (latest version), or pick another
-   version on the [Releases](https://github.com/DeanOpen/MacViewer/releases/latest) page.
+1. Open the [**Download**](https://github.com/DeanOpen/MacViewer/releases/latest) page and get `MacViewer-<version>.dmg`.
 2. Open the DMG and drag **MacViewer** into **Applications**.
 3. If the release isn't notarized, macOS will block the first launch. Right-click
    the app, choose **Open**, then confirm. You can also run:
