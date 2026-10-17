@@ -114,7 +114,7 @@ enum NativeSessionError: LocalizedError {
 @MainActor
 final class UnavailableUltraViewerAdapter: MacViewerSessionAdapter {
     let availability: SessionAvailability = .unavailable(
-        "This build cannot connect to Windows UltraViewer yet. Partner authentication and remote-screen streaming are not available."
+        "This build cannot connect to UltraViewer yet. Partner authentication and remote-screen streaming are not available."
     )
 
     func connect(partnerID: String, password: String) async throws -> AsyncThrowingStream<RemoteSessionEvent, Error> {

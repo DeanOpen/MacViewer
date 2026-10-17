@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="docs/images/app-icon.png" width="128" alt="MacViewer icon">
+<img src="docs/images/app-icon.png" width="128" alt="Biểu tượng MacViewer">
 
 # MacViewer
 
-**A native macOS client for UltraViewer: control Windows PCs from your Mac, or share your Mac with them.**
+**Ứng dụng UltraViewer gốc cho macOS: điều khiển máy tính khác từ máy Mac, hoặc chia sẻ máy Mac của bạn.**
+
+**Tiếng Việt** · [English](README.en.md)
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -12,136 +14,138 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 
-<img src="docs/images/main-window.png" width="820" alt="MacViewer main window">
+<img src="docs/images/main-window-vi.png" width="820" alt="Cửa sổ chính của MacViewer">
 
 </div>
 
 ---
 
-MacViewer connects to existing Windows computers running **UltraViewer** and
-accepts approved connections from them. It's built with SwiftUI and AppKit on
-top of a Swift/C protocol engine. It doesn't use Wine, and it doesn't run any
-Windows executable code.
+MacViewer kết nối đến các máy tính khác đang chạy **UltraViewer** (hoặc
+MacViewer) và nhận các kết nối đến sau khi bạn chấp thuận. Ứng dụng được viết
+bằng SwiftUI và AppKit, dựa trên một bộ xử lý giao thức Swift/C. Ứng dụng không
+dùng Wine và không chạy bất kỳ mã thực thi Windows nào.
 
 > [!IMPORTANT]
-> MacViewer is an independent, community-built implementation. It's **not**
-> an official UltraViewer product and isn't affiliated with or endorsed by the
-> UltraViewer developers. Only connect to computers you're authorized to access.
+> MacViewer là một bản triển khai độc lập do cộng đồng phát triển. Đây **không**
+> phải sản phẩm chính thức của UltraViewer và không liên kết hay được bảo trợ bởi
+> nhà phát triển UltraViewer. Chỉ kết nối đến những máy tính bạn được phép truy cập.
 
-## Features
+## Tính năng
 
-### Mac → Windows (control a Windows PC)
+### Kết nối (điều khiển máy tính khác)
 
-- Connect with the partner **ID and password** shown in UltraViewer on Windows
-- Encrypted partner lookup and login, TLS relay with certificate validation,
-  and a **direct LAN connection** that falls back to the relay when needed
-- Fast screen decoding (Zstandard dictionary, RGB555/JPEG, scroll/copy, tile cache)
-- Keyboard and mouse control that you turn on yourself:
+- Kết nối bằng **ID và mật khẩu** đối tác hiển thị trong UltraViewer trên máy kia
+- Tra cứu và đăng nhập đối tác được mã hóa, máy chủ chuyển tiếp TLS có kiểm tra
+  chứng chỉ, và **kết nối trực tiếp trong mạng LAN**, tự chuyển sang máy chủ
+  chuyển tiếp khi cần
+- Giải mã màn hình nhanh (từ điển Zstandard, RGB555/JPEG, cuộn/sao chép vùng,
+  bộ nhớ đệm ô)
+- Điều khiển bàn phím và chuột do bạn tự bật:
   <kbd>⌘</kbd> → Win, <kbd>⌥</kbd> → Alt, <kbd>⌃</kbd> → Ctrl,
-  with trackpad and wheel scrolling
-- Toolbar with monitor selection, scaling, quality, wallpaper, remote cursor
-  and **Windows computer audio**
-- Screenshots with region selection and annotations, and **video recording**
-- Floating **chat** panel and opt-in two-way **clipboard** sharing
-- Optional password storage in the macOS **Keychain**
+  hỗ trợ cuộn bằng bàn di chuột và con lăn
+- Thanh công cụ chọn màn hình, tỉ lệ hiển thị, chất lượng, hình nền, con trỏ từ
+  xa và **âm thanh của máy từ xa**
+- Chụp màn hình có chọn vùng và chú thích, cùng **quay video**
+- Khung **trò chuyện** nổi và **chia sẻ bộ nhớ tạm** hai chiều (tùy chọn bật)
+- Lưu mật khẩu trong **Chuỗi khóa macOS** (tùy chọn)
 
-### Windows → Mac (share this Mac)
+### Chia sẻ (chia sẻ máy Mac này)
 
-- Share the Mac's screen with a Windows UltraViewer user, after you approve
-  each connection on the Mac
-- A built-in guide for granting **Screen Recording** and **Accessibility**
-  permissions
-- You approve viewing or control separately. You can end a session or pause
-  incoming access at any time.
+- Chia sẻ màn hình máy Mac với người dùng UltraViewer khác, sau khi bạn chấp
+  thuận từng kết nối trên máy Mac
+- Hướng dẫn tích hợp để cấp quyền **Ghi màn hình** và **Trợ năng**
+- Bạn chấp thuận riêng quyền xem và quyền điều khiển. Bạn có thể kết thúc phiên
+  hoặc tạm dừng truy cập từ xa bất cứ lúc nào.
 
-### General
+### Chung
 
-- English and Tiếng Việt UI, or follow the system language
-- Universal binary (Apple silicon + Intel), macOS 14 Sonoma or later
+- Giao diện tiếng Việt và tiếng Anh, hoặc theo ngôn ngữ hệ thống
+- Bản dựng Universal (Apple silicon + Intel), yêu cầu macOS 14 Sonoma trở lên
 
-### Not supported yet
+### Chưa hỗ trợ
 
-File transfer, microphone/voice chat, Mac-host audio, sharing more than one Mac
-display, and unattended Mac access. Older Windows UltraViewer versions,
-non-US keyboard layouts/IME and 8-bit screen mode haven't been validated.
+Truyền tệp, micro/trò chuyện thoại, âm thanh khi chia sẻ máy Mac, chia sẻ nhiều
+màn hình Mac, và truy cập máy Mac không cần người trực. Các phiên bản UltraViewer
+Windows cũ, bàn phím không phải kiểu Mỹ/bộ gõ (IME) và chế độ màn hình 8 bit
+chưa được kiểm chứng.
 
-## Installation
+## Cài đặt
 
-1. Download the latest `MacViewer-<version>.dmg` (or `.zip`) from
+1. Tải tệp `MacViewer-<phiên bản>.dmg` (hoặc `.zip`) mới nhất tại
    [**Releases**](https://github.com/DeanOpen/MacViewer/releases/latest).
-2. Open the DMG and drag **MacViewer** into **Applications**.
-3. If the release isn't notarized, macOS will block the first launch. Right-click
-   the app, choose **Open**, then confirm. You can also run:
+2. Mở tệp DMG và kéo **MacViewer** vào thư mục **Applications**.
+3. Nếu bản phát hành chưa được Apple công chứng (notarize), macOS sẽ chặn lần mở
+   đầu tiên. Nhấp chuột phải vào ứng dụng, chọn **Open** rồi xác nhận. Hoặc chạy:
 
    ```sh
    xattr -dr com.apple.quarantine /Applications/MacViewer.app
    ```
 
-## Usage
+## Cách dùng
 
-**Connect to Windows:** Type the **ID** and **password** shown in UltraViewer
-on the Windows PC, then click **Connect Windows**. To send keyboard and mouse
-input, turn on **Control** in the session toolbar.
+**Kết nối đến máy khác:** Nhập **ID** và **mật khẩu** của đối tác hiển thị trong
+UltraViewer, rồi bấm **Kết nối đến máy khác**. Để gửi thao tác bàn phím và
+chuột, bật **Điều khiển** trên thanh công cụ của phiên.
 
-**Share this Mac:** Click **Start sharing this Mac** and follow the permission
-guide:
+**Chia sẻ máy Mac này:** Bấm **Bắt đầu chia sẻ máy Mac** và làm theo hướng dẫn
+cấp quyền:
 
-| Permission | Required for |
+| Quyền | Dùng để |
 | --- | --- |
-| Screen Recording | Letting Windows see your screen |
-| Accessibility | Letting Windows control the keyboard and mouse |
+| Ghi màn hình | Cho phép máy kia xem màn hình của bạn |
+| Trợ năng | Cho phép máy kia điều khiển bàn phím và chuột |
 
-Enter the Mac's ID and password on the Windows PC, then approve the request on
-the Mac. If macOS asks, reopen MacViewer after you change Screen Recording.
+Nhập ID và mật khẩu của máy Mac trên máy kia, rồi chấp thuận yêu cầu trên máy
+Mac. Nếu macOS yêu cầu, hãy mở lại MacViewer sau khi thay đổi quyền Ghi màn hình.
 
-## Building from source
+## Tự build từ mã nguồn
 
-Requirements: macOS 14+, Xcode 16+ / Swift 6+.
+Yêu cầu: macOS 14+, Xcode 16+ / Swift 6+.
 
 ```sh
 git clone https://github.com/DeanOpen/MacViewer.git
 cd MacViewer
 
-swift test                       # run the test suite
-scripts/package_app.sh release     # build dist/MacViewer.app
+swift test                       # chạy bộ kiểm thử
+scripts/package_app.sh release   # build dist/MacViewer.app
 open dist/MacViewer.app
 ```
 
-## Project layout
+## Cấu trúc dự án
 
 ```
 Sources/
-  MacViewer/              SwiftUI/AppKit app (UI, capture, input, hosting)
-  UltraViewerProtocol/    Protocol engine: crypto, relay, screen codec, audio
+  MacViewer/              Ứng dụng SwiftUI/AppKit (giao diện, chụp màn hình, nhập liệu, chia sẻ)
+  UltraViewerProtocol/    Bộ xử lý giao thức: mã hóa, chuyển tiếp, giải mã màn hình, âm thanh
 ThirdParty/
   zstd/                   Zstandard 1.5.7 (BSD / GPLv2)
-  g722/                   WebRTC G.722 decoder
-Tests/                    Protocol and app unit tests
-scripts/                  App packaging and icon generation
+  g722/                   Bộ giải mã WebRTC G.722
+Tests/                    Kiểm thử giao thức và ứng dụng
+scripts/                  Đóng gói ứng dụng và tạo biểu tượng
 ```
 
-## Contributing
+## Đóng góp
 
-Issues and pull requests are welcome. Before you open a PR, please:
+Rất hoan nghênh issue và pull request. Trước khi mở PR, vui lòng:
 
-1. Run `swift test` and make sure it passes.
-2. Keep new user-facing strings in both `en.lproj` and `vi.lproj`.
-3. Never commit credentials, partner IDs, session tokens or UltraViewer binaries.
+1. Chạy `swift test` và đảm bảo tất cả đều qua.
+2. Thêm chuỗi hiển thị mới vào cả `en.lproj` và `vi.lproj`.
+3. Không bao giờ commit thông tin đăng nhập, ID đối tác, token phiên hay tệp
+   nhị phân của UltraViewer.
 
-## Privacy
+## Quyền riêng tư
 
-MacViewer doesn't collect telemetry. Passwords are saved only when you choose
-to remember them, and only in the macOS Keychain. They're never written to
-recent-partner history, UserDefaults or registration profiles.
+MacViewer không thu thập dữ liệu sử dụng. Mật khẩu chỉ được lưu khi bạn chọn ghi
+nhớ, và chỉ lưu trong Chuỗi khóa macOS. Mật khẩu không bao giờ được ghi vào lịch
+sử đối tác, UserDefaults hay hồ sơ đăng ký.
 
-## License
+## Giấy phép
 
-MacViewer is released under the [MIT License](LICENSE).
+MacViewer được phát hành theo [Giấy phép MIT](LICENSE).
 
-Bundled third-party components keep their own licenses. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The `8bit.dat` screen
-dictionary is an UltraViewer-supplied data asset and is **not** covered by the
-MIT license.
+Các thành phần bên thứ ba đi kèm giữ nguyên giấy phép riêng. Xem
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Tệp từ điển màn hình `8bit.dat`
+là dữ liệu do UltraViewer cung cấp và **không** thuộc phạm vi giấy phép MIT.
 
-UltraViewer is a trademark of its respective owner and is used here only to
-describe compatibility.
+UltraViewer là thương hiệu của chủ sở hữu tương ứng và chỉ được nhắc đến ở đây
+để mô tả khả năng tương thích.

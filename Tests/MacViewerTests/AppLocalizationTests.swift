@@ -15,8 +15,8 @@ struct AppLocalizationTests {
             #expect(english[key]?.isEmpty == false, "Missing English key: \(key)")
             #expect(vietnamese[key]?.isEmpty == false, "Missing Vietnamese key: \(key)")
         }
-        #expect(AppLanguage.localized("Connect to Windows", language: .en) == "Connect to Windows")
-        #expect(AppLanguage.localized("Connect to Windows", language: .vi) == "Kết nối Windows")
+        #expect(AppLanguage.localized("Connect to Windows", language: .en) == "Connect to another computer")
+        #expect(AppLanguage.localized("Connect to Windows", language: .vi) == "Kết nối đến máy khác")
         #expect(AppLanguage.localized("a-synthetic-unknown-key", language: .vi) == "a-synthetic-unknown-key")
     }
 

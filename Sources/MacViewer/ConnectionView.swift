@@ -553,7 +553,7 @@ private struct IncomingMacConnectionView: View {
                 .font(.system(size: 40)).foregroundStyle(.teal)
             Text("Incoming connection").font(.title2.weight(.semibold))
             if let request = hosting.pendingRequest {
-                Text("\(request.displayName ?? "A Windows computer") wants to access this Mac.")
+                Text("\(request.displayName ?? L("Another computer")) wants to access this Mac.")
                 Text("Partner ID: \(request.viewerID)").font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary)
             }
             Text("Allow viewing to share your screen. Allow control also gives access to your mouse and keyboard.")
