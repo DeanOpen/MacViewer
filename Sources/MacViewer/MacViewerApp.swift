@@ -6,19 +6,28 @@ struct MacViewerApp: App {
     @StateObject private var model = ConnectionModel(adapter: NativeUltraViewerAdapter())
     @StateObject private var hosting = MacHostingModel()
     @StateObject private var capture = RemoteCaptureController()
+    @StateObject private var updater = UpdateChecker()
     @NSApplicationDelegateAdaptor(MacViewerAppDelegate.self) private var applicationDelegate
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
 
     var body: some Scene {
         WindowGroup("MacViewer") {
-            ConnectionView(model: model, hosting: hosting, remoteCapture: capture)
+            ConnectionView(model: model, hosting: hosting, remoteCapture: capture, updater: updater)
                 .frame(minWidth: 960, minHeight: 680)
-                .onAppear { applicationDelegate.capture = capture }
+                .onAppear {
+                    applicationDelegate.capture = capture
+                    applicationDelegate.model = model
+                    applicationDelegate.hosting = hosting
+                    updater.checkAutomatically()
+                }
                 .appLanguage()
         }
         .defaultSize(width: 1120, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
+            }
             CommandMenu(L("Connection")) {
                 Button(L("Connect")) { model.connect() }
                     .keyboardShortcut("k", modifiers: [.command])
@@ -36,11 +45,13 @@ struct MacViewerApp: App {
 }
 
 struct MacViewerSettings: View {
+    private static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     @ObservedObject var model: ConnectionModel
     @AppStorage(ConnectionModel.rememberPartnersKey) private var rememberPartners = true
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
+    @AppStorage(UpdateChecker.automaticKey) private var checkForUpdates = true
 
     var body: some View {
         Form {
@@ -72,7 +83,8 @@ struct MacViewerSettings: View {
                 LabeledContent("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
             }
             Section("About") {
-                LabeledContent("Application", value: "MacViewer 0.3.0")
+                LabeledContent("Application", value: "MacViewer \(Self.version)")
+                Toggle("Automatically check for updates", isOn: $checkForUpdates)
                 Text("An independent native Mac app for UltraViewer interoperability.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -86,6 +98,8 @@ struct MacViewerSettings: View {
 @MainActor
 final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
     weak var capture: RemoteCaptureController?
+    weak var model: ConnectionModel?
+    weak var hosting: MacHostingModel?
     private var isFinishing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -95,16 +109,32 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
            let icon = NSImage(contentsOf: url) { NSApp.applicationIconImage = icon }
     }
 
+    // Closing the only window ends MacViewer, and with it every connection.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let capture, capture.isRecording || capture.isFinishingRecording || capture.isPreparingRecording else {
-            return .terminateNow
-        }
         guard !isFinishing else { return .terminateLater }
         isFinishing = true
         Task {
-            await capture.stopRecording()
+            if let capture, capture.isRecording || capture.isFinishingRecording || capture.isPreparingRecording {
+                await capture.stopRecording()
+            }
+            // Tell the other computer the session is over before the process
+            // exits; otherwise it waits for a relay timeout. Never block quit
+            // for long on an unresponsive network.
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await self.closeConnections() }
+                group.addTask { try? await Task.sleep(for: .seconds(2)) }
+                await group.next()
+                group.cancelAll()
+            }
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    private func closeConnections() async {
+        await model?.shutdown()
+        await hosting?.shutdown()
     }
 }

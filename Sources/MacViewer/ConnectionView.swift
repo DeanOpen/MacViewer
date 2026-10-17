@@ -8,6 +8,7 @@ struct ConnectionView: View {
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
     @ObservedObject var remoteCapture: RemoteCaptureController
+    @ObservedObject var updater: UpdateChecker
     @State private var remoteDisplayScale: RemoteDisplayScale = .fit
     @State private var remoteImageQuality: RemoteImageQuality = .automatic
     @State private var showSession = false
@@ -68,9 +69,33 @@ struct ConnectionView: View {
             model.releaseRemoteInput()
             revealPassword = false
         }
+        .alert(updateAlertTitle, isPresented: $updater.showResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if case let .failed(message) = updater.state { Text(message) }
+            else { Text("You have the latest version, \(updater.currentVersion).") }
+        }
+        // Hosted on a background view so it never competes with the incoming-request sheet.
+        .background(EmptyView().sheet(isPresented: $updater.showSheet) {
+            UpdateSheet(updater: updater, endsConnections: model.isSessionActive || hosting.viewer != nil)
+                .appLanguage()
+        })
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             model.disconnect(); hosting.stop()
         }
+    }
+
+    /// Opens the update sheet, which shows the details and any progress.
+    private func updateButton(_ release: UpdateChecker.Release) -> some View {
+        Button { updater.showSheet = true } label: {
+            Label("Update to \(release.version)", systemImage: "arrow.down.circle.fill")
+        }
+        .buttonStyle(.borderedProminent).controlSize(.small)
+        .help("Install the new version and restart MacViewer")
+    }
+
+    private var updateAlertTitle: LocalizedStringKey {
+        if case .failed = updater.state { "Update failed" } else { "MacViewer is up to date" }
     }
 
     private var appHeader: some View {
@@ -111,6 +136,7 @@ struct ConnectionView: View {
                 Label(LocalizedStringKey(hosting.isRunning ? "Incoming access on" : "Incoming access paused"), systemImage: "shield.lefthalf.filled")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            if let release = updater.availableRelease { updateButton(release) }
             SettingsLink { Image(systemName: "gearshape").font(.title3) }
                 .buttonStyle(.plain).help("Settings")
                 .padding(.leading, 12)
