@@ -119,7 +119,7 @@ ThirdParty/
   zstd/                   Zstandard 1.5.7 (BSD / GPLv2)
   g722/                   WebRTC G.722 decoder
 Tests/                    Protocol and app unit tests
-scripts/                  App packaging and icon generation
+scripts/                  App packaging, icon and DMG generation
 ```
 
 ## Contributing

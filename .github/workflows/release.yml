@@ -129,12 +129,9 @@ jobs:
           dmg_name="MacViewer-${VERSION}.dmg"
           ditto -c -k --sequesterRsrc --keepParent dist/MacViewer.app "release/$zip_name"
 
-          staging="$RUNNER_TEMP/dmg"
-          mkdir -p "$staging"
-          cp -R dist/MacViewer.app "$staging/"
-          ln -s /Applications "$staging/Applications"
-          hdiutil create -volname "MacViewer ${VERSION}" -srcfolder "$staging" \
-            -fs HFS+ -format UDZO -ov "release/$dmg_name"
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install --quiet dmgbuild==1.6.5
+          PATH="$RUNNER_TEMP/dmgbuild/bin:$PATH" scripts/make_dmg.sh dist/MacViewer.app "$VERSION" "release/$dmg_name"
 
           if [ "${{ steps.cert.outputs.identity }}" != "-" ]; then
             codesign --force --timestamp --sign "${{ steps.cert.outputs.identity }}" "release/$dmg_name"

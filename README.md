@@ -4,7 +4,7 @@
 
 # MacViewer
 
-**Ứng dụng UltraViewer gốc cho macOS: điều khiển máy tính khác từ máy Mac, hoặc chia sẻ máy Mac của bạn.**
+**Dùng UltraViewer ngay trên máy Mac: điều khiển máy khác hoặc cho người khác truy cập máy Mac của bạn.**
 
 **Tiếng Việt** · [English](README.en.md)
 
@@ -14,138 +14,137 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 
-<img src="docs/images/main-window-vi.png" width="820" alt="Cửa sổ chính của MacViewer">
+<img src="docs/images/main-window-vi.png" width="820" alt="Giao diện chính của MacViewer">
 
 </div>
 
 ---
 
-MacViewer kết nối đến các máy tính khác đang chạy **UltraViewer** (hoặc
-MacViewer) và nhận các kết nối đến sau khi bạn chấp thuận. Ứng dụng được viết
-bằng SwiftUI và AppKit, dựa trên một bộ xử lý giao thức Swift/C. Ứng dụng không
-dùng Wine và không chạy bất kỳ mã thực thi Windows nào.
+UltraViewer chỉ có bản cho Windows. MacViewer là ứng dụng macOS thuần, giúp
+bạn kết nối tới máy đang chạy UltraViewer (hoặc MacViewer), và cho phép người
+khác điều khiển máy Mac của bạn khi bạn đồng ý. Ứng dụng viết bằng
+SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào của Windows.
 
 > [!IMPORTANT]
-> MacViewer là một bản triển khai độc lập do cộng đồng phát triển. Đây **không**
-> phải sản phẩm chính thức của UltraViewer và không liên kết hay được bảo trợ bởi
-> nhà phát triển UltraViewer. Chỉ kết nối đến những máy tính bạn được phép truy cập.
+> MacViewer là dự án cá nhân, mã nguồn mở, **không phải** sản phẩm chính thức
+> của UltraViewer và không liên quan gì đến đội ngũ phát triển UltraViewer.
+> Chỉ kết nối tới những máy mà bạn được phép truy cập.
 
 ## Tính năng
 
-### Kết nối (điều khiển máy tính khác)
+### Kết nối tới máy khác
 
-- Kết nối bằng **ID và mật khẩu** đối tác hiển thị trong UltraViewer trên máy kia
-- Tra cứu và đăng nhập đối tác được mã hóa, máy chủ chuyển tiếp TLS có kiểm tra
-  chứng chỉ, và **kết nối trực tiếp trong mạng LAN**, tự chuyển sang máy chủ
-  chuyển tiếp khi cần
-- Giải mã màn hình nhanh (từ điển Zstandard, RGB555/JPEG, cuộn/sao chép vùng,
-  bộ nhớ đệm ô)
-- Điều khiển bàn phím và chuột do bạn tự bật:
-  <kbd>⌘</kbd> → Win, <kbd>⌥</kbd> → Alt, <kbd>⌃</kbd> → Ctrl,
-  hỗ trợ cuộn bằng bàn di chuột và con lăn
-- Thanh công cụ chọn màn hình, tỉ lệ hiển thị, chất lượng, hình nền, con trỏ từ
-  xa và **âm thanh của máy từ xa**
-- Chụp màn hình có chọn vùng và chú thích, cùng **quay video**
-- Khung **trò chuyện** nổi và **chia sẻ bộ nhớ tạm** hai chiều (tùy chọn bật)
-- Lưu mật khẩu trong **Chuỗi khóa macOS** (tùy chọn)
+- Nhập **ID và mật khẩu** hiện trên UltraViewer của máy kia là kết nối được
+- Kết nối được mã hóa, đi qua máy chủ trung gian có TLS; nếu hai máy cùng mạng
+  LAN thì tự kết nối trực tiếp cho nhanh
+- Hiển thị màn hình mượt, hỗ trợ cả màn hình 4K
+- Điều khiển chuột, bàn phím (chỉ khi bạn bật **Điều khiển**). Phím được chuyển
+  đổi sẵn: <kbd>⌘</kbd> → Win, <kbd>⌥</kbd> → Alt, <kbd>⌃</kbd> → Ctrl. Cuộn
+  bằng trackpad hay chuột đều được
+- Thanh công cụ: chọn màn hình, thu phóng, chất lượng hình, ẩn/hiện hình nền,
+  con trỏ chuột và **nghe âm thanh từ máy kia**
+- Chụp màn hình (chọn vùng, ghi chú lên ảnh) và **quay video**
+- **Chat** với người bên kia và đồng bộ **clipboard** hai chiều (tùy chọn)
+- Có thể lưu mật khẩu vào **Keychain** của macOS cho lần sau
 
-### Chia sẻ (chia sẻ máy Mac này)
+### Cho người khác truy cập máy Mac
 
-- Chia sẻ màn hình máy Mac với người dùng UltraViewer khác, sau khi bạn chấp
-  thuận từng kết nối trên máy Mac
-- Hướng dẫn tích hợp để cấp quyền **Ghi màn hình** và **Trợ năng**
-- Bạn chấp thuận riêng quyền xem và quyền điều khiển. Bạn có thể kết thúc phiên
-  hoặc tạm dừng truy cập từ xa bất cứ lúc nào.
+- Người khác chỉ xem hoặc điều khiển được sau khi bạn bấm đồng ý trên máy Mac
+- Có hướng dẫn từng bước để bật quyền **Ghi màn hình** và **Trợ năng**
+- Quyền xem và quyền điều khiển được duyệt riêng. Bạn có thể ngắt kết nối hoặc
+  tạm khóa truy cập bất cứ lúc nào
 
-### Chung
+### Khác
 
-- Giao diện tiếng Việt và tiếng Anh, hoặc theo ngôn ngữ hệ thống
-- Bản dựng Universal (Apple silicon + Intel), yêu cầu macOS 14 Sonoma trở lên
+- Giao diện tiếng Việt và tiếng Anh, hoặc tự theo ngôn ngữ của máy
+- Chạy trên cả chip Apple (M1, M2…) và Intel, yêu cầu macOS 14 Sonoma trở lên
 
 ### Chưa hỗ trợ
 
-Truyền tệp, micro/trò chuyện thoại, âm thanh khi chia sẻ máy Mac, chia sẻ nhiều
-màn hình Mac, và truy cập máy Mac không cần người trực. Các phiên bản UltraViewer
-Windows cũ, bàn phím không phải kiểu Mỹ/bộ gõ (IME) và chế độ màn hình 8 bit
-chưa được kiểm chứng.
+Gửi file, nói chuyện qua micro, phát âm thanh khi chia sẻ máy Mac, chia sẻ
+nhiều màn hình Mac cùng lúc và truy cập không cần người ngồi máy. Chưa thử
+nghiệm với các bản UltraViewer cũ, bàn phím không phải kiểu US, bộ gõ tiếng Việt
+khi điều khiển, và chế độ màu 8-bit.
 
 ## Cài đặt
 
-1. Tải tệp `MacViewer-<phiên bản>.dmg` (hoặc `.zip`) mới nhất tại
+1. Tải file `MacViewer-<phiên bản>.dmg` mới nhất ở trang
    [**Releases**](https://github.com/DeanOpen/MacViewer/releases/latest).
-2. Mở tệp DMG và kéo **MacViewer** vào thư mục **Applications**.
-3. Nếu bản phát hành chưa được Apple công chứng (notarize), macOS sẽ chặn lần mở
-   đầu tiên. Nhấp chuột phải vào ứng dụng, chọn **Open** rồi xác nhận. Hoặc chạy:
+2. Mở file DMG, kéo **MacViewer** thả vào thư mục **Applications**.
+3. Mở MacViewer từ Launchpad hoặc thư mục Applications.
 
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/MacViewer.app
-   ```
+Nếu macOS báo không mở được ứng dụng, hãy nhấp chuột phải vào MacViewer, chọn
+**Open** rồi bấm **Open** lần nữa. Hoặc chạy lệnh:
 
-## Cách dùng
+```sh
+xattr -dr com.apple.quarantine /Applications/MacViewer.app
+```
 
-**Kết nối đến máy khác:** Nhập **ID** và **mật khẩu** của đối tác hiển thị trong
-UltraViewer, rồi bấm **Kết nối đến máy khác**. Để gửi thao tác bàn phím và
-chuột, bật **Điều khiển** trên thanh công cụ của phiên.
+## Hướng dẫn sử dụng
 
-**Chia sẻ máy Mac này:** Bấm **Bắt đầu chia sẻ máy Mac** và làm theo hướng dẫn
-cấp quyền:
+**Điều khiển máy khác:** Nhập **ID** và **mật khẩu** đang hiện trên UltraViewer
+của máy kia, rồi bấm **Kết nối đến máy khác**. Muốn dùng chuột và bàn phím thì
+bật **Điều khiển** trên thanh công cụ.
 
-| Quyền | Dùng để |
+**Cho người khác vào máy Mac:** Bấm **Bắt đầu chia sẻ máy Mac** và làm theo
+hướng dẫn để bật quyền:
+
+| Quyền | Để làm gì |
 | --- | --- |
-| Ghi màn hình | Cho phép máy kia xem màn hình của bạn |
-| Trợ năng | Cho phép máy kia điều khiển bàn phím và chuột |
+| Ghi màn hình | Người kia nhìn thấy màn hình của bạn |
+| Trợ năng | Người kia điều khiển được chuột và bàn phím |
 
-Nhập ID và mật khẩu của máy Mac trên máy kia, rồi chấp thuận yêu cầu trên máy
-Mac. Nếu macOS yêu cầu, hãy mở lại MacViewer sau khi thay đổi quyền Ghi màn hình.
+Gửi ID và mật khẩu của máy Mac cho người kia, rồi bấm đồng ý khi có yêu cầu
+kết nối. Nếu macOS yêu cầu, hãy tắt và mở lại MacViewer sau khi bật quyền Ghi
+màn hình.
 
-## Tự build từ mã nguồn
+## Build từ mã nguồn
 
-Yêu cầu: macOS 14+, Xcode 16+ / Swift 6+.
+Cần macOS 14 trở lên và Xcode 16 / Swift 6 trở lên.
 
 ```sh
 git clone https://github.com/DeanOpen/MacViewer.git
 cd MacViewer
 
-swift test                       # chạy bộ kiểm thử
-scripts/package_app.sh release   # build dist/MacViewer.app
+swift test                       # chạy test
+scripts/package_app.sh release   # build ra dist/MacViewer.app
 open dist/MacViewer.app
 ```
 
-## Cấu trúc dự án
+## Cấu trúc thư mục
 
 ```
 Sources/
-  MacViewer/              Ứng dụng SwiftUI/AppKit (giao diện, chụp màn hình, nhập liệu, chia sẻ)
-  UltraViewerProtocol/    Bộ xử lý giao thức: mã hóa, chuyển tiếp, giải mã màn hình, âm thanh
+  MacViewer/              Ứng dụng (giao diện, chụp màn hình, điều khiển, chia sẻ)
+  UltraViewerProtocol/    Phần giao thức: mã hóa, kết nối, giải mã hình ảnh, âm thanh
 ThirdParty/
-  zstd/                   Zstandard 1.5.7 (BSD / GPLv2)
-  g722/                   Bộ giải mã WebRTC G.722
-Tests/                    Kiểm thử giao thức và ứng dụng
-scripts/                  Đóng gói ứng dụng và tạo biểu tượng
+  zstd/                   Thư viện nén Zstandard 1.5.7 (BSD / GPLv2)
+  g722/                   Bộ giải mã âm thanh G.722 của WebRTC
+Tests/                    Unit test
+scripts/                  Script đóng gói app và tạo file DMG
 ```
 
 ## Đóng góp
 
-Rất hoan nghênh issue và pull request. Trước khi mở PR, vui lòng:
+Mọi issue và pull request đều được chào đón. Trước khi gửi PR, bạn vui lòng:
 
-1. Chạy `swift test` và đảm bảo tất cả đều qua.
-2. Thêm chuỗi hiển thị mới vào cả `en.lproj` và `vi.lproj`.
-3. Không bao giờ commit thông tin đăng nhập, ID đối tác, token phiên hay tệp
-   nhị phân của UltraViewer.
+1. Chạy `swift test` và đảm bảo không có test nào lỗi.
+2. Nếu thêm chữ mới trên giao diện, thêm vào cả `en.lproj` và `vi.lproj`.
+3. Không commit mật khẩu, ID đối tác, token hay file cài đặt của UltraViewer.
 
 ## Quyền riêng tư
 
-MacViewer không thu thập dữ liệu sử dụng. Mật khẩu chỉ được lưu khi bạn chọn ghi
-nhớ, và chỉ lưu trong Chuỗi khóa macOS. Mật khẩu không bao giờ được ghi vào lịch
-sử đối tác, UserDefaults hay hồ sơ đăng ký.
+MacViewer không thu thập bất kỳ dữ liệu nào. Mật khẩu chỉ được lưu khi bạn chọn
+ghi nhớ, và chỉ lưu trong Keychain của macOS. Lịch sử kết nối chỉ lưu ID, không
+bao giờ lưu mật khẩu.
 
 ## Giấy phép
 
-MacViewer được phát hành theo [Giấy phép MIT](LICENSE).
+MacViewer phát hành theo [giấy phép MIT](LICENSE).
 
-Các thành phần bên thứ ba đi kèm giữ nguyên giấy phép riêng. Xem
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Tệp từ điển màn hình `8bit.dat`
-là dữ liệu do UltraViewer cung cấp và **không** thuộc phạm vi giấy phép MIT.
+Các thư viện bên thứ ba vẫn giữ giấy phép riêng của chúng, xem
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). File `8bit.dat` là dữ liệu
+lấy từ UltraViewer và **không** thuộc giấy phép MIT.
 
-UltraViewer là thương hiệu của chủ sở hữu tương ứng và chỉ được nhắc đến ở đây
-để mô tả khả năng tương thích.
+UltraViewer là thương hiệu của chủ sở hữu tương ứng, chỉ được nhắc đến ở đây để
+nói rõ khả năng tương thích.
