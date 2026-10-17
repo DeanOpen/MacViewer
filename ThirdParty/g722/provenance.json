@@ -1,0 +1,50 @@
+{
+  "project": "WebRTC G.722 decoder",
+  "commit": "4fdd50a57b79826ea87cc5170be78b6444d9cdf9",
+  "localCompatibility": {
+    "file": "ThirdParty/g722/MacViewerG722.c",
+    "reason": "NAudio1.8.5 wraps final QMF output to Int16; the pinned WebRTC decoder saturates it. Predictor state is identical and unchanged.",
+    "method": "Decode one encoded byte through unchanged upstream; recompute only clipped final output from the upstream QMF history and copy modulo-2^16 sample bits.",
+    "primarySource": "https://raw.githubusercontent.com/naudio/NAudio/f8fe61c3a90dd267746ef950f00ad659f498b786/NAudio/Codecs/G722Codec.cs",
+    "sourceLines": "294-308",
+    "windowsOracle": "analysis/evidence/windows/audio-codec-fixture.json",
+    "testFixture": "Tests/Fixtures/g722-windows.json",
+    "upstreamFilesModified": false,
+    "primarySourceCommit": "f8fe61c3a90dd267746ef950f00ad659f498b786",
+    "primarySourceSHA256": "d0115621c31678d599840b94e8a23dfa082bb4d1821f51cef46dff9ae479175a",
+    "primarySourceLocalPath": "analysis/evidence/windows/NAudio-v1.8.4-G722Codec.cs",
+    "windowsFirstOverflow": {
+      "sampleIndex": 76,
+      "rawQMF": 37090,
+      "NAudioWrapped": -28446,
+      "WebRTCSaturated": 32767
+    },
+    "windowsOverflowSampleCount": 549
+  },
+  "files": [
+    {
+      "upstreamPath": "modules/third_party/g722/g722_decode.c",
+      "localPath": "ThirdParty/g722/g722_decode.c",
+      "sha256": "ad930feb5e109d06d9ba047f339926f295da41dae3c4f00cf136aa84fd50e24d",
+      "url": "https://webrtc.googlesource.com/src/+/4fdd50a57b79826ea87cc5170be78b6444d9cdf9/modules/third_party/g722/g722_decode.c?format=TEXT"
+    },
+    {
+      "upstreamPath": "modules/third_party/g722/g722_enc_dec.h",
+      "localPath": "ThirdParty/g722/g722_enc_dec.h",
+      "sha256": "33606ddc73e46803176e0e5936ced4e8600c2e6e3209776bc224a95a22d5539b",
+      "url": "https://webrtc.googlesource.com/src/+/4fdd50a57b79826ea87cc5170be78b6444d9cdf9/modules/third_party/g722/g722_enc_dec.h?format=TEXT"
+    },
+    {
+      "upstreamPath": "modules/third_party/g722/LICENSE",
+      "localPath": "ThirdParty/g722/LICENSE",
+      "sha256": "61862327fd00d6a4deb2c1276577782c2500f4fe103e072018fc369d8e37e876",
+      "url": "https://webrtc.googlesource.com/src/+/4fdd50a57b79826ea87cc5170be78b6444d9cdf9/modules/third_party/g722/LICENSE?format=TEXT"
+    },
+    {
+      "upstreamPath": "LICENSE",
+      "localPath": "ThirdParty/g722/WEBRTC_LICENSE",
+      "sha256": "ab00a482b6a3902e40211b43c5d0441962ea99b6cc7c25c0f243fa270b78d482",
+      "url": "https://webrtc.googlesource.com/src/+/4fdd50a57b79826ea87cc5170be78b6444d9cdf9/LICENSE?format=TEXT"
+    }
+  ]
+}

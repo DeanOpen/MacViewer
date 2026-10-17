@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.3.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Run tests
+        run: swift test --parallel
+
+      - name: Import Developer ID certificate
+        id: cert
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            echo "No signing certificate configured; the release will be ad-hoc signed."
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/{print $2; exit}')"
+          if [ -z "$identity" ]; then
+            echo "::error::No 'Developer ID Application' identity found in the certificate."
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Package universal app
+        env:
+          MACVIEWER_SIGNING_IDENTITY: "-"
+          MACVIEWER_UNIVERSAL: "1"
+          MACVIEWER_VERSION: ${{ env.VERSION }}
+          MACVIEWER_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          scripts/package_app.sh release
+          lipo -info dist/MacViewer.app/Contents/MacOS/MacViewer
+
+      - name: Sign with Developer ID (hardened runtime)
+        if: steps.cert.outputs.identity != '-'
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "${{ steps.cert.outputs.identity }}" dist/MacViewer.app
+          codesign --verify --deep --strict --verbose=2 dist/MacViewer.app
+
+      - name: Configure notarization credentials
+        if: steps.cert.outputs.identity != '-'
+        id: notary
+        env:
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Prefer an App Store Connect API key; fall back to Apple ID + app-specific password.
+          if [ -n "$APPSTORE_API_KEY_P8" ] && [ -n "$APPSTORE_API_KEY_ID" ] && [ -n "$APPSTORE_API_ISSUER_ID" ]; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+            printf '%s\n' "$APPSTORE_API_KEY_P8" > "$key_path"
+            xcrun notarytool store-credentials macviewer-notary --keychain "$RUNNER_TEMP/signing.keychain-db" \
+              --key "$key_path" --key-id "$APPSTORE_API_KEY_ID" --issuer "$APPSTORE_API_ISSUER_ID"
+            rm -f "$key_path"
+          elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            xcrun notarytool store-credentials macviewer-notary --keychain "$RUNNER_TEMP/signing.keychain-db" \
+              --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"
+          else
+            echo "Notarization secrets missing; skipping notarization."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize app
+        if: steps.notary.outputs.enabled == 'true'
+        run: |
+          ditto -c -k --keepParent dist/MacViewer.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --keychain-profile macviewer-notary --keychain "$RUNNER_TEMP/signing.keychain-db" --wait --timeout 30m
+          xcrun stapler staple dist/MacViewer.app
+          echo "NOTARIZED=true" >> "$GITHUB_ENV"
+
+      - name: Build ZIP and DMG
+        run: |
+          mkdir -p release
+          zip_name="MacViewer-${VERSION}.zip"
+          dmg_name="MacViewer-${VERSION}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent dist/MacViewer.app "release/$zip_name"
+
+          staging="$RUNNER_TEMP/dmg"
+          mkdir -p "$staging"
+          cp -R dist/MacViewer.app "$staging/"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "MacViewer ${VERSION}" -srcfolder "$staging" \
+            -fs HFS+ -format UDZO -ov "release/$dmg_name"
+
+          if [ "${{ steps.cert.outputs.identity }}" != "-" ]; then
+            codesign --force --timestamp --sign "${{ steps.cert.outputs.identity }}" "release/$dmg_name"
+            if [ "${NOTARIZED:-}" = "true" ]; then
+              xcrun notarytool submit "release/$dmg_name" \
+                --keychain-profile macviewer-notary --keychain "$RUNNER_TEMP/signing.keychain-db" --wait --timeout 30m
+              xcrun stapler staple "release/$dmg_name"
+            fi
+          fi
+
+          cd release
+          shasum -a 256 "$zip_name" "$dmg_name" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: MacViewer ${{ env.VERSION }}
+          prerelease: ${{ env.PRERELEASE }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/MacViewer-${{ env.VERSION }}.dmg
+            release/MacViewer-${{ env.VERSION }}.zip
+            release/SHA256SUMS.txt
+          body: |
+            ## Install
+            1. Download **MacViewer-${{ env.VERSION }}.dmg**, open it and drag MacViewer into Applications.
+            2. Requires macOS 14 or later (Apple silicon and Intel).
+            3. If macOS blocks an unnotarized build: right-click the app → **Open**, or run
+               `xattr -dr com.apple.quarantine /Applications/MacViewer.app`.
+
+      - name: Clean up keychain
+        if: always() && steps.cert.outputs.identity != '-'
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true

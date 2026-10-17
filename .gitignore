@@ -1,0 +1,66 @@
+# ---------------------------------------------------------------------------
+# Proprietary / private material: never publish
+# ---------------------------------------------------------------------------
+# Original Windows UltraViewer binaries and assets (local analysis input only)
+/UltraViewer/
+# Decompiled and disassembled UltraViewer output and private runtime evidence
+# (265 MB, includes files larger than GitHub's 100 MB limit)
+/analysis/
+# Reverse-engineering scripts, Windows probes and protocol probe (local only)
+/tools/
+# Protocol notes and validation reports (local only); keep README images
+/docs/*
+!/docs/images/
+
+# Signing material and secrets
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+.env
+.env.*
+registration*.json
+*.multipart
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/.build/
+/dist/
+/release/
+/.tools/
+*.dmg
+*.app.zip
+*.iconset/
+
+# Swift Package Manager / Xcode
+.swiftpm/
+/Packages/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# ---------------------------------------------------------------------------
+# Python helpers
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---------------------------------------------------------------------------
+# Logs and editor / OS files
+# ---------------------------------------------------------------------------
+*.log
+.DS_Store
+._*
+.AppleDouble
+.vscode/
+.idea/
+*.swp
+*~
