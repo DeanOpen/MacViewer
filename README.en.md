@@ -73,6 +73,14 @@ non-US keyboard layouts/IME and 8-bit screen mode haven't been validated.
 
 ## Installation
 
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask deanopen/tap/macviewer
+```
+
+Or install manually:
+
 1. Open the [**Download**](https://github.com/DeanOpen/MacViewer/releases/latest) page and get `MacViewer-<version>.dmg`.
 2. Open the DMG and drag **MacViewer** into **Applications**.
 3. If the release isn't notarized, macOS will block the first launch. Right-click

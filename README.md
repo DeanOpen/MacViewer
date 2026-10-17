@@ -72,6 +72,14 @@ khi điều khiển, và chế độ màu 8-bit.
 
 ## Cài đặt
 
+Cài bằng [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask deanopen/tap/macviewer
+```
+
+Hoặc cài thủ công:
+
 1. Vào trang [**Tải về**](https://github.com/DeanOpen/MacViewer/releases/latest) và tải file `MacViewer-<phiên bản>.dmg`.
 2. Mở file DMG, kéo **MacViewer** thả vào thư mục **Applications**.
 3. Mở MacViewer từ Launchpad hoặc thư mục Applications.
