@@ -341,3 +341,5 @@
 "Downloading… %lld%%" = "Đang tải… %lld%%";
 "Installing update… MacViewer will restart." = "Đang cài đặt… MacViewer sẽ tự khởi động lại.";
 "Updating restarts MacViewer and ends current connections." = "Cập nhật sẽ khởi động lại MacViewer và ngắt các kết nối hiện tại.";
+"Share clipboard with the other computer" = "Chia sẻ bảng nhớ tạm với máy kia";
+"Text copied on either computer can be pasted on the other. Applies to new sessions." = "Chữ copy ở máy này có thể dán ở máy kia và ngược lại. Áp dụng cho các phiên kết nối mới.";

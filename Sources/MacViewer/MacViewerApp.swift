@@ -52,6 +52,7 @@ struct MacViewerSettings: View {
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
     @AppStorage(UpdateChecker.automaticKey) private var checkForUpdates = true
+    @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = true
 
     var body: some View {
         Form {
@@ -74,6 +75,11 @@ struct MacViewerSettings: View {
                 Button("Clear Recent Partners") { model.clearRecentPartners() }
                     .disabled(model.recentPartners.isEmpty)
                 Button("Forget saved passwords", action: model.forgetSavedPasswords)
+            }
+            Section("Clipboard") {
+                Toggle("Share clipboard with the other computer", isOn: $shareClipboard)
+                Text("Text copied on either computer can be pasted on the other. Applies to new sessions.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Remote screen") {
                 Toggle("Smooth image scaling", isOn: $smoothScreen)

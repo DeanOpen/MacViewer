@@ -9,7 +9,9 @@ struct SessionToolsModelTests {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
         board.setString("existing private fixture", forType: .string)
-        let model = SessionToolsModel(pasteboard: board)
+        let defaults = try #require(UserDefaults(suiteName: "SessionToolsModelTests-\(UUID().uuidString)"))
+        defaults.set(false, forKey: SessionToolsModel.shareClipboardKey)
+        let model = SessionToolsModel(pasteboard: board, defaults: defaults)
         var sent: [String] = []
         var sharing: [Bool] = []
         model.activate(sendChat: { _ in }, sendClipboard: { sent.append($0) }, setSharing: { sharing.append($0) })
@@ -38,6 +40,26 @@ struct SessionToolsModelTests {
         await model.pollClipboardOnce()
         #expect(sent.count == 1)
         #expect(sharing.first == true)
+    }
+
+    @Test("Clipboard sharing starts with the session by default, without sending existing contents")
+    func clipboardOnByDefault() async throws {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setString("existing private fixture", forType: .string)
+        let suite = "SessionToolsModelTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = SessionToolsModel(pasteboard: board, defaults: defaults)
+        var sent: [String] = []
+        model.activate(sendChat: { _ in }, sendClipboard: { sent.append($0) }, setSharing: { _ in })
+        for _ in 0..<100 where !model.clipboardEnabled { await Task.yield() }
+        #expect(model.clipboardEnabled)
+        await model.pollClipboardOnce()
+        #expect(sent.isEmpty)
+        model.receiveClipboard("copied on the remote computer")
+        #expect(board.string(forType: .string) == "copied on the remote computer")
+        model.deactivate()
     }
 
     @Test("Chat completion from an old session cannot enter a replacement transcript")

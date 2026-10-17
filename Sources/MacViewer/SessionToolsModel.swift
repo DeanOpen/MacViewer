@@ -42,7 +42,16 @@ final class SessionToolsModel: ObservableObject {
     private var clipboardChange = 0
     private var latestClipboardText: String?
 
-    init(pasteboard: NSPasteboard = .general) { self.pasteboard = pasteboard }
+    /// Like UltraViewer on Windows, clipboard sharing starts with each session
+    /// unless turned off in Settings.
+    static let shareClipboardKey = "MacViewer.shareClipboard"
+    private let defaults: UserDefaults
+
+    init(pasteboard: NSPasteboard = .general, defaults: UserDefaults = .standard) {
+        self.pasteboard = pasteboard
+        self.defaults = defaults
+        defaults.register(defaults: [Self.shareClipboardKey: true])
+    }
 
     func activate(sendChat: @escaping SendText, sendClipboard: @escaping SendText,
                   setSharing: @escaping SetSharing, sendTyping: SendTyping? = nil) {
@@ -50,6 +59,7 @@ final class SessionToolsModel: ObservableObject {
         self.sendChat = sendChat; self.sendClipboard = sendClipboard; self.setSharing = setSharing
         self.sendTyping = sendTyping
         messages = []; draft = ""; errorMessage = nil; isActive = true
+        if defaults.bool(forKey: Self.shareClipboardKey) { setClipboardEnabled(true) }
     }
 
     func deactivate() {
