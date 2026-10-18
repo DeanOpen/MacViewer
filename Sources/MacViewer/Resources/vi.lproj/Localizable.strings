@@ -358,8 +358,8 @@
 "Works with" = "Tương thích với";
 "Send keyboard shortcuts to the other computer" = "Gửi phím tắt sang máy kia";
 "When off, ⌘ shortcuts stay on this Mac." = "Khi tắt, các phím tắt ⌘ chỉ tác dụng trên máy Mac này.";
-"⌘ shortcuts → other computer" = "Phím tắt ⌘ → máy kia";
-"⌘ shortcuts → this Mac" = "Phím tắt ⌘ → máy Mac này";
+"Shortcuts: other computer" = "Phím tắt: máy kia";
+"Shortcuts: this Mac" = "Phím tắt: máy Mac này";
 "Click to choose where ⌘ keyboard shortcuts go" = "Bấm để chọn nơi nhận phím tắt ⌘";
 "⌘ shortcuts go to the other computer. Click to keep them on this Mac." = "Phím tắt ⌘ được gửi sang máy kia. Bấm để giữ lại trên máy Mac này.";
 "⌘ shortcuts stay on this Mac. Click to send them to the other computer." = "Phím tắt ⌘ chỉ tác dụng trên máy Mac này. Bấm để gửi sang máy kia.";

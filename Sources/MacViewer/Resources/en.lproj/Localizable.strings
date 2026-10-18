@@ -358,8 +358,8 @@
 "Works with" = "Works with";
 "Send keyboard shortcuts to the other computer" = "Send keyboard shortcuts to the other computer";
 "When off, ⌘ shortcuts stay on this Mac." = "When off, ⌘ shortcuts stay on this Mac.";
-"⌘ shortcuts → other computer" = "⌘ shortcuts → other computer";
-"⌘ shortcuts → this Mac" = "⌘ shortcuts → this Mac";
+"Shortcuts: other computer" = "Shortcuts: other computer";
+"Shortcuts: this Mac" = "Shortcuts: this Mac";
 "Click to choose where ⌘ keyboard shortcuts go" = "Click to choose where ⌘ keyboard shortcuts go";
 "⌘ shortcuts go to the other computer. Click to keep them on this Mac." = "⌘ shortcuts go to the other computer. Click to keep them on this Mac.";
 "⌘ shortcuts stay on this Mac. Click to send them to the other computer." = "⌘ shortcuts stay on this Mac. Click to send them to the other computer.";

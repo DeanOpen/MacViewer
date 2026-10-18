@@ -431,6 +431,8 @@ final class ConnectionModel: ObservableObject {
                 }
             }
             startInput()
+            // Start in control when the partner allows it; View only stays one click away.
+            if info.allowsRemoteInput { controlEnabled = true }
             sendCommands([RemoteControlCommands.cursorPositions(enabled: showRemoteCursor)], requiresControl: false)
             let token = generation
             tools.activate(sendChat: { [weak self] text in

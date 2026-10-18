@@ -608,7 +608,7 @@ struct ConnectionView: View {
                 Button {
                     model.releaseRemoteInput(); forwardShortcuts.toggle()
                 } label: {
-                    Label(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts → other computer" : "⌘ shortcuts → this Mac"),
+                    Label(LocalizedStringKey(forwardShortcuts ? "Shortcuts: other computer" : "Shortcuts: this Mac"),
                           systemImage: "command")
                 }
                 .buttonStyle(.borderless)
