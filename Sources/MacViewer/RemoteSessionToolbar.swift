@@ -92,8 +92,12 @@ struct RemoteSessionToolbar: View {
                 .accessibilityLabel("Send keyboard shortcuts to the other computer")
             Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
                 .disabled(!isConnected || !allowsControl).fixedSize()
-            Button("Disconnect", role: .destructive, action: callbacks.disconnect)
-                .help("End the connection to this computer")
+            // Filled red so it reads as a button among the borderless toolbar items.
+            Button(role: .destructive, action: callbacks.disconnect) {
+                Label("Disconnect", systemImage: "xmark.circle.fill")
+            }
+            .buttonStyle(.borderedProminent).tint(.red)
+            .help("End the connection to this computer")
             Button(action: callbacks.hideToolbar) { Image(systemName: "chevron.up") }
                 .help("Hide session toolbar").accessibilityLabel("Hide session toolbar")
         }
