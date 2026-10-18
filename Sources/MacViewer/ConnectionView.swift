@@ -57,7 +57,14 @@ struct ConnectionView: View {
             } message: {
                 Text("End this incoming session and connect to the same Windows computer? Control will stay off until you enable it.")
             }
-        .onDisappear { remoteCapture.endSession(); model.disconnect(); hosting.stop() }
+        .onDisappear {
+            remoteCapture.endSession(); model.disconnect(); hosting.stop()
+            // An open Settings window would otherwise keep MacViewer running
+            // after its main window closed; closing it lets the app quit.
+            for window in NSApp.windows where window.identifier?.rawValue.contains("Settings") == true {
+                window.close()
+            }
+        }
         .onChange(of: hosting.identifier) { _, id in if id == nil { revealPassword = false } }
         .onChange(of: model.phase) { _, phase in
             if phase == .connecting || phase == .connected { showSession = true }
