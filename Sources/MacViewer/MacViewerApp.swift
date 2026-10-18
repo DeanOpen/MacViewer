@@ -25,7 +25,8 @@ struct MacViewerApp: App {
         .defaultSize(width: 1120, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {}
-            CommandGroup(after: .appInfo) {
+            CommandGroup(replacing: .appInfo) {
+                Button(L("About MacViewer")) { MacViewerAbout.show() }
                 Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
             }
             CommandMenu(L("Connection")) {
@@ -91,6 +92,8 @@ struct MacViewerSettings: View {
             }
             Section("About") {
                 LabeledContent("Application", value: "MacViewer \(Self.version)")
+                LabeledContent("Author", value: MacViewerAbout.author)
+                Link("github.com/DeanOpen/MacViewer", destination: MacViewerAbout.repository)
                 Toggle("Automatically check for updates", isOn: $checkForUpdates)
                 Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
                     .disabled(updater.state == .checking)
@@ -145,5 +148,27 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
     private func closeConnections() async {
         await model?.shutdown()
         await hosting?.shutdown()
+    }
+}
+
+/// Standard About panel with the author and a link to the project.
+enum MacViewerAbout {
+    static let author = "DeanOpen"
+    static let repository = URL(string: "https://github.com/DeanOpen/MacViewer")!
+
+    @MainActor
+    static func show() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let body: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph,
+        ]
+        let credits = NSMutableAttributedString(string: L("Made by") + " \(author)\n", attributes: body)
+        var link = body
+        link[.link] = repository
+        link[.foregroundColor] = NSColor.linkColor
+        credits.append(NSAttributedString(string: "github.com/DeanOpen/MacViewer", attributes: link))
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
+        NSApp.activate()
     }
 }

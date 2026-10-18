@@ -27,7 +27,7 @@ if [[ -z "$signing_identity" ]]; then
 fi
 
 # CI sets these; local builds keep the current development values.
-app_version="${MACVIEWER_VERSION:-0.3.5}"
+app_version="${MACVIEWER_VERSION:-0.3.6}"
 build_number="${MACVIEWER_BUILD_NUMBER:-5}"
 build_flags=(--configuration "$configuration")
 if [[ "${MACVIEWER_UNIVERSAL:-0}" == "1" ]]; then
@@ -75,6 +75,7 @@ cat > "$app_directory/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 DeanOpen · MIT License</string>
 </dict>
 </plist>
 PLIST
