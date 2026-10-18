@@ -7,6 +7,7 @@ struct ConnectionView: View {
     @ObservedObject var hosting: MacHostingModel
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
+    @AppStorage(RemoteScreenNSView.forwardShortcutsKey) private var forwardShortcuts = true
     @ObservedObject var remoteCapture: RemoteCaptureController
     @ObservedObject var updater: UpdateChecker
     @State private var remoteDisplayScale: RemoteDisplayScale = .fit
@@ -518,7 +519,9 @@ struct ConnectionView: View {
                 isConnected: model.phase == .connected,
                 allowsControl: model.remoteInfo?.allowsRemoteInput == true,
                 controlEnabled: Binding(get: { model.controlEnabled }, set: { model.setControlEnabled($0) }),
-                displayScale: $remoteDisplayScale, smoothScaling: $smoothScreen, imageQuality: $remoteImageQuality,
+                displayScale: $remoteDisplayScale, smoothScaling: $smoothScreen,
+                forwardShortcuts: Binding(get: { forwardShortcuts }, set: { model.releaseRemoteInput(); forwardShortcuts = $0 }),
+                imageQuality: $remoteImageQuality,
                 tools: model.tools, capture: remoteCapture, image: model.displayedFrame?.image,
                 callbacks: .init(home: { model.releaseRemoteInput(); showSession = false },
                                  disconnect: model.disconnect, releaseInput: model.releaseRemoteInput,
@@ -575,6 +578,16 @@ struct ConnectionView: View {
                 Text(L(model.status)).lineLimit(1)
                 Spacer()
                 if let frame = model.frame { Text("\(frame.image.width) × \(frame.image.height)").monospacedDigit() }
+                if model.controlEnabled {
+                    Button {
+                        model.releaseRemoteInput(); forwardShortcuts.toggle()
+                    } label: {
+                        Label(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts → other computer" : "⌘ shortcuts → this Mac"),
+                              systemImage: "command")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Click to choose where ⌘ keyboard shortcuts go")
+                }
                 Text(LocalizedStringKey(model.controlEnabled ? "Keyboard & mouse enabled" : "View only · Change in Configuration"))
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 5).background(.bar)
         }

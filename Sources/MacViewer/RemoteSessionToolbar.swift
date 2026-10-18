@@ -56,6 +56,7 @@ struct RemoteSessionToolbar: View {
     @Binding var controlEnabled: Bool
     @Binding var displayScale: RemoteDisplayScale
     @Binding var smoothScaling: Bool
+    @Binding var forwardShortcuts: Bool
     @Binding var imageQuality: RemoteImageQuality
     @ObservedObject var tools: SessionToolsModel
     @ObservedObject var capture: RemoteCaptureController
@@ -83,6 +84,11 @@ struct RemoteSessionToolbar: View {
             SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput,
                                toggleSidebar: callbacks.toggleChat)
             Divider().frame(height: 23)
+            Toggle(isOn: $forwardShortcuts) { Image(systemName: "command") }
+                .toggleStyle(.button).disabled(!controlEnabled)
+                .help(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts go to the other computer. Click to keep them on this Mac."
+                                       : "⌘ shortcuts stay on this Mac. Click to send them to the other computer."))
+                .accessibilityLabel("Send keyboard shortcuts to the other computer")
             Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
                 .disabled(!isConnected || !allowsControl).fixedSize()
             Button("Disconnect", role: .destructive, action: callbacks.disconnect)
@@ -162,6 +168,8 @@ struct RemoteSessionToolbar: View {
             }
             Toggle("Smooth scaling", isOn: $smoothScaling)
             Divider()
+            Toggle("Send keyboard shortcuts to the other computer", isOn: $forwardShortcuts)
+                .disabled(!controlEnabled)
             Toggle("View only", isOn: Binding(get: { !controlEnabled }, set: { controlEnabled = !$0 }))
                 .disabled(!allowsControl)
             if let setWallpaper = callbacks.setWallpaper {
