@@ -35,6 +35,7 @@ if [[ "${MACVIEWER_UNIVERSAL:-0}" == "1" ]]; then
 fi
 
 swift build "${build_flags[@]}" --product MacViewer
+swift build "${build_flags[@]}" --product macviewer-mcp
 binary_directory="$(swift build "${build_flags[@]}" --show-bin-path)"
 app_directory="$project_root/dist/MacViewer.app"
 mkdir -p "$app_directory/Contents/MacOS" "$app_directory/Contents/Resources"
@@ -56,6 +57,9 @@ cp ThirdParty/g722/WEBRTC_LICENSE "$app_directory/Contents/Resources/Licenses/G7
 # its original mapped inode while a newly launched process gets the new build.
 cp "$binary_directory/MacViewer" "$app_directory/Contents/MacOS/MacViewer.new"
 mv -f "$app_directory/Contents/MacOS/MacViewer.new" "$app_directory/Contents/MacOS/MacViewer"
+# The stdio MCP server that AI apps launch; it relays to the running app.
+cp "$binary_directory/macviewer-mcp" "$app_directory/Contents/MacOS/macviewer-mcp.new"
+mv -f "$app_directory/Contents/MacOS/macviewer-mcp.new" "$app_directory/Contents/MacOS/macviewer-mcp"
 cp Sources/UltraViewerProtocol/Resources/8bit.dat "$app_directory/Contents/Resources/8bit.dat"
 cat > "$app_directory/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -79,6 +83,7 @@ cat > "$app_directory/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+codesign --force --sign "$signing_identity" --timestamp=none "$app_directory/Contents/MacOS/macviewer-mcp"
 codesign --force --sign "$signing_identity" --timestamp=none "$app_directory"
 codesign --verify --deep --strict "$app_directory"
 # Updating nested resources leaves the bundle directory's timestamp unchanged.

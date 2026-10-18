@@ -79,10 +79,13 @@ jobs:
         run: |
           scripts/package_app.sh release
           lipo -info dist/MacViewer.app/Contents/MacOS/MacViewer
+          lipo -info dist/MacViewer.app/Contents/MacOS/macviewer-mcp
 
       - name: Sign with Developer ID (hardened runtime)
         if: steps.cert.outputs.identity != '-'
         run: |
+          codesign --force --options runtime --timestamp \
+            --sign "${{ steps.cert.outputs.identity }}" dist/MacViewer.app/Contents/MacOS/macviewer-mcp
           codesign --force --options runtime --timestamp \
             --sign "${{ steps.cert.outputs.identity }}" dist/MacViewer.app
           codesign --verify --deep --strict --verbose=2 dist/MacViewer.app

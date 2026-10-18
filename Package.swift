@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "UltraViewerProtocol", targets: ["UltraViewerProtocol"]),
         .executable(name: "MacViewer", targets: ["MacViewer"]),
+        .executable(name: "macviewer-mcp", targets: ["macviewer-mcp"]),
     ],
     targets: [
         .target(
@@ -45,6 +46,7 @@ let package = Package(
                 resources: [.copy("Resources/8bit.dat")]),
         .executableTarget(name: "MacViewer", dependencies: ["UltraViewerProtocol"],
                           resources: [.process("Resources")]),
+        .executableTarget(name: "macviewer-mcp", path: "Sources/MacViewerMCP"),
         .testTarget(name: "UltraViewerProtocolTests", dependencies: ["UltraViewerProtocol"]),
         .testTarget(name: "MacViewerTests", dependencies: ["MacViewer"]),
     ]

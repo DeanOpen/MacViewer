@@ -116,6 +116,41 @@ guide:
 Enter the Mac's ID and password on the other computer, then approve the request
 on the Mac. If macOS asks, reopen MacViewer after you change Screen Recording.
 
+## Use with AI agents (MCP)
+
+MacViewer includes an MCP server, so AI apps and coding agents can see the
+remote screen and use the mouse and keyboard during a session you opened.
+
+1. Open **MacViewer › Settings › AI Agents** and turn on **Allow AI agents to use MacViewer**.
+2. Under **AI apps and coding agents**, click **Add** next to your app, or
+   **Add to all detected apps**. Then restart that app.
+3. Connect to a computer and switch **Control** on. Then ask the agent, for example:
+   *"Take a screenshot of the remote computer and open Notepad."*
+
+One-click setup supports Claude Code, Claude Desktop, Cursor, VS Code (GitHub
+Copilot), VS Code Insiders, Windsurf, Codex, Gemini CLI, Zed, Cline, Roo Code,
+Kiro, Amazon Q Developer, opencode, LM Studio and Continue. For Goose,
+JetBrains AI Assistant and Warp, MacViewer copies a snippet you paste into that
+app's settings. For any other app, use **Copy config**. The server runs
+`MacViewer.app/Contents/MacOS/macviewer-mcp` (stdio), for example:
+
+```sh
+claude mcp add --scope user macviewer -- /Applications/MacViewer.app/Contents/MacOS/macviewer-mcp
+```
+
+Tools: `session_status`, `screenshot`, `click`, `move_mouse`, `drag`, `scroll`,
+`type_text`, `press_keys`, `select_monitor`, `remote_action`, `send_chat`,
+`read_chat`, `set_clipboard`, `get_clipboard`, `connect`, `disconnect`.
+
+- AI agents are off by default. Everything stays on this Mac: the helper talks to
+  the app over a local socket that only your user account can open.
+- Agents can use the mouse and keyboard only while **Control** is on. Starting or
+  ending connections needs its own permission.
+- MacViewer asks before a new agent acts. While an agent is controlling the
+  computer, the session window shows **AI is controlling · Stop**.
+- Before changing an app's config file, MacViewer saves a `.macviewer-backup`
+  copy. It never rewrites files that contain comments.
+
 ## Building from source
 
 Requirements: macOS 14+, Xcode 16+ / Swift 6+.

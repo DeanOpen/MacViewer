@@ -10,11 +10,12 @@ struct ConnectionView: View {
     @AppStorage(RemoteScreenNSView.forwardShortcutsKey) private var forwardShortcuts = true
     @ObservedObject var remoteCapture: RemoteCaptureController
     @ObservedObject var updater: UpdateChecker
+    @ObservedObject var agents: AgentBridge
     @State private var remoteDisplayScale: RemoteDisplayScale = .fit
     @State private var remoteImageQuality: RemoteImageQuality = .automatic
     @State private var showSession = false
-    @State private var showSessionToolbar = true
-    @AppStorage("MacViewer.chatSidebar") private var showChatSidebar = false
+    @AppStorage(RemoteSessionCommands.toolbarKey) private var showSessionToolbar = true
+    @AppStorage(RemoteSessionCommands.chatSidebarKey) private var showChatSidebar = false
     @State private var readMessages = 0
     @State private var remoteWallpaperVisible = true
     @State private var revealPassword = false
@@ -83,6 +84,14 @@ struct ConnectionView: View {
             UpdateSheet(updater: updater, endsConnections: model.isSessionActive || hosting.viewer != nil)
                 .appLanguage()
         })
+        .alert(LF("Allow %@ to use MacViewer?", agents.pendingApproval?.client ?? ""), isPresented: Binding(
+            get: { agents.pendingApproval != nil }, set: { _ in })) {
+                Button("Allow once") { agents.resolveApproval(.once) }
+                Button("Always allow") { agents.resolveApproval(.always) }
+                Button("Don’t allow", role: .cancel) { agents.resolveApproval(.deny) }
+            } message: {
+                Text("An AI agent wants to use MacViewer. It can do what you allowed in Settings › AI Agents, such as seeing the remote screen and using the mouse and keyboard while Control is on.")
+            }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             model.disconnect(); hosting.stop()
         }
@@ -580,6 +589,9 @@ struct ConnectionView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: showChatSidebar)
+            .onChange(of: showChatSidebar) { _, shown in
+                if shown { readMessages = model.tools.messages.count }
+            }
             .onChange(of: model.tools.messages.count) { _, count in
                 if showChatSidebar || count < readMessages { readMessages = count }
             }
@@ -591,6 +603,7 @@ struct ConnectionView: View {
                 Circle().fill(model.phase == .connected ? .green : .orange).frame(width: 7, height: 7)
                 Text(L(model.status)).lineLimit(1)
                 Spacer()
+                if agents.isActing || agents.isStoppedForSession { agentBadge }
                 if let frame = model.frame { Text("\(frame.image.width) × \(frame.image.height)").monospacedDigit() }
                 Button {
                     model.releaseRemoteInput(); forwardShortcuts.toggle()
@@ -607,6 +620,22 @@ struct ConnectionView: View {
                 .disabled(model.phase != .connected || model.remoteInfo?.allowsRemoteInput != true)
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 5).background(.bar)
         }
+    }
+
+    private var agentBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+            if agents.isStoppedForSession {
+                Text("AI control stopped")
+            } else {
+                Text("AI is controlling")
+                Button("Stop", action: agents.stopAgents).buttonStyle(.borderless)
+                    .help("Disconnect AI agents and block their input for this session")
+            }
+        }
+        .foregroundStyle(.purple)
+        .padding(.horizontal, 8).padding(.vertical, 2)
+        .background(.purple.opacity(0.12), in: Capsule())
     }
 
     private var cardBackground: Color { Color(nsColor: .controlBackgroundColor) }

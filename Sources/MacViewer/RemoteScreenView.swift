@@ -148,7 +148,15 @@ final class RemoteScreenNSView: NSView {
     }
 
     private func keepsLocally(_ event: NSEvent) -> Bool {
-        !forwardsShortcuts && event.modifierFlags.contains(.command)
+        event.modifierFlags.contains(.command) && (!forwardsShortcuts || Self.isReservedShortcut(event))
+    }
+
+    /// The View menu's ⌃⌥⌘ shortcuts and ⌃⌘F always stay on this Mac so the
+    /// session can be controlled while other ⌘ shortcuts go to the peer.
+    static func isReservedShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if flags == [.command, .control, .option] { return true }
+        return flags == [.command, .control] && event.charactersIgnoringModifiers?.lowercased() == "f"
     }
 
     override func keyDown(with event: NSEvent) {
@@ -198,7 +206,7 @@ final class RemoteScreenNSView: NSView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard inputEnabled, window?.firstResponder === self,
-              event.type == .keyDown, event.modifierFlags.contains(.command), forwardsShortcuts else {
+              event.type == .keyDown, event.modifierFlags.contains(.command), !keepsLocally(event) else {
             return super.performKeyEquivalent(with: event)
         }
         keyDown(with: event)

@@ -117,6 +117,37 @@ Gửi ID và mật khẩu của máy Mac cho người kia, rồi bấm đồng �
 kết nối. Nếu macOS yêu cầu, hãy tắt và mở lại MacViewer sau khi bật quyền Ghi
 màn hình.
 
+## Dùng với trợ lý AI (MCP)
+
+MacViewer có sẵn MCP server. Nhờ đó các ứng dụng AI và trợ lý lập trình có thể
+xem màn hình máy kia và dùng chuột, bàn phím trong phiên kết nối bạn đã mở.
+
+1. Mở **MacViewer › Cài đặt › Trợ lý AI**, bật **Cho phép trợ lý AI dùng MacViewer**.
+2. Trong mục **Ứng dụng AI và trợ lý lập trình**, bấm **Thêm** cạnh ứng dụng của
+   bạn, hoặc **Thêm vào mọi ứng dụng tìm thấy**. Sau đó khởi động lại ứng dụng đó.
+3. Kết nối tới máy khác và bật **Điều khiển**. Rồi nhờ trợ lý, ví dụ:
+   *"Chụp màn hình máy kia và mở Notepad."*
+
+Hỗ trợ thêm bằng một cú bấm cho Claude Code, Claude Desktop, Cursor, VS Code
+(GitHub Copilot), VS Code Insiders, Windsurf, Codex, Gemini CLI, Zed, Cline,
+Roo Code, Kiro, Amazon Q Developer, opencode, LM Studio và Continue. Với Goose,
+JetBrains AI Assistant và Warp, MacViewer sao chép sẵn cấu hình để bạn dán vào
+cài đặt của ứng dụng. Ứng dụng khác thì dùng **Sao chép cấu hình**. Server chạy
+`MacViewer.app/Contents/MacOS/macviewer-mcp` (stdio), ví dụ:
+
+```sh
+claude mcp add --scope user macviewer -- /Applications/MacViewer.app/Contents/MacOS/macviewer-mcp
+```
+
+- Mặc định tính năng này tắt. Mọi thứ chỉ diễn ra trên máy Mac: công cụ trao đổi
+  với ứng dụng qua socket cục bộ mà chỉ tài khoản của bạn mở được.
+- Trợ lý chỉ dùng được chuột, bàn phím khi bạn bật **Điều khiển**. Muốn trợ lý tự
+  kết nối hoặc ngắt kết nối thì phải bật quyền riêng cho việc đó.
+- MacViewer hỏi bạn trước khi một trợ lý mới thao tác. Khi trợ lý đang điều khiển,
+  cửa sổ phiên hiện **AI đang điều khiển · Dừng**.
+- Trước khi sửa tệp cấu hình của ứng dụng, MacViewer lưu một bản `.macviewer-backup`.
+  Tệp nào có chú thích thì MacViewer không ghi đè.
+
 ## Build từ mã nguồn
 
 Cần macOS 14 trở lên và Xcode 16 / Swift 6 trở lên.

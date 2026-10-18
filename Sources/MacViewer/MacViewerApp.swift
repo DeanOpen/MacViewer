@@ -3,22 +3,31 @@ import SwiftUI
 
 @main
 struct MacViewerApp: App {
-    @StateObject private var model = ConnectionModel(adapter: NativeUltraViewerAdapter())
+    @StateObject private var model: ConnectionModel
+    @StateObject private var agents: AgentBridge
     @StateObject private var hosting = MacHostingModel()
     @StateObject private var capture = RemoteCaptureController()
     @StateObject private var updater = UpdateChecker()
     @NSApplicationDelegateAdaptor(MacViewerAppDelegate.self) private var applicationDelegate
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
 
+    init() {
+        let model = ConnectionModel(adapter: NativeUltraViewerAdapter())
+        _model = StateObject(wrappedValue: model)
+        _agents = StateObject(wrappedValue: AgentBridge(model: model))
+    }
+
     var body: some Scene {
         WindowGroup("MacViewer") {
-            ConnectionView(model: model, hosting: hosting, remoteCapture: capture, updater: updater)
+            ConnectionView(model: model, hosting: hosting, remoteCapture: capture, updater: updater, agents: agents)
                 .frame(minWidth: 960, minHeight: 680)
                 .onAppear {
                     applicationDelegate.capture = capture
                     applicationDelegate.model = model
                     applicationDelegate.hosting = hosting
+                    applicationDelegate.agents = agents
                     updater.startAutomaticChecks()
+                    agents.start()
                 }
                 .appLanguage()
         }
@@ -29,6 +38,7 @@ struct MacViewerApp: App {
                 Button(L("About MacViewer")) { MacViewerAbout.show() }
                 Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
             }
+            RemoteSessionCommands(model: model)
             CommandMenu(L("Connection")) {
                 Button(L("Connect")) { model.connect() }
                     .keyboardShortcut("k", modifiers: [.command])
@@ -40,7 +50,7 @@ struct MacViewerApp: App {
         }
 
         Settings {
-            MacViewerSettings(model: model, updater: updater).appLanguage()
+            MacViewerSettings(model: model, updater: updater, agents: agents).appLanguage()
         }
     }
 }
@@ -49,6 +59,7 @@ struct MacViewerSettings: View {
     private static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     @ObservedObject var model: ConnectionModel
     @ObservedObject var updater: UpdateChecker
+    @ObservedObject var agents: AgentBridge
     @AppStorage(ConnectionModel.rememberPartnersKey) private var rememberPartners = true
     @AppStorage("MacViewer.smoothScreen") private var smoothScreen = true
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
@@ -57,6 +68,15 @@ struct MacViewerSettings: View {
     @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = true
 
     var body: some View {
+        TabView {
+            general.tabItem { Label("General", systemImage: "gearshape") }
+            AgentSettingsView(agents: agents).tabItem { Label("AI Agents", systemImage: "sparkles") }
+            about.tabItem { Label("About", systemImage: "info.circle") }
+        }
+        .frame(width: 560, height: 620)
+    }
+
+    private var general: some View {
         Form {
             Section("Language") {
                 Picker("App language", selection: $language) {
@@ -90,6 +110,12 @@ struct MacViewerSettings: View {
                 }
                 LabeledContent("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
             }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var about: some View {
+        Form {
             Section("About") {
                 LabeledContent("Application", value: "MacViewer \(Self.version)")
                 LabeledContent("Author", value: MacViewerAbout.author)
@@ -104,7 +130,6 @@ struct MacViewerSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 490, height: 540)
     }
 }
 
@@ -113,6 +138,7 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
     weak var capture: RemoteCaptureController?
     weak var model: ConnectionModel?
     weak var hosting: MacHostingModel?
+    weak var agents: AgentBridge?
     private var isFinishing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -147,6 +173,7 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closeConnections() async {
+        agents?.shutdown()
         await model?.shutdown()
         await hosting?.shutdown()
     }
@@ -175,5 +202,38 @@ enum MacViewerAbout {
         credits.append(NSAttributedString(string: "UltraViewer", attributes: link))
         NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
         NSApp.activate()
+    }
+}
+
+/// View menu items for the remote session. Their ⌃⌥⌘ shortcuts (and ⌃⌘F) are
+/// never forwarded, so they work even while ⌘ shortcuts go to the other computer.
+struct RemoteSessionCommands: Commands {
+    static let toolbarKey = "MacViewer.sessionToolbar"
+    static let chatSidebarKey = "MacViewer.chatSidebar"
+    @ObservedObject var model: ConnectionModel
+    @AppStorage(toolbarKey) private var showToolbar = true
+    @AppStorage(chatSidebarKey) private var showChat = false
+    @AppStorage(RemoteScreenNSView.forwardShortcutsKey) private var forwardShortcuts = true
+
+    var body: some Commands {
+        CommandGroup(before: .toolbar) {
+            Button(L(showToolbar ? "Hide Session Toolbar" : "Show Session Toolbar")) { showToolbar.toggle() }
+                .keyboardShortcut("t", modifiers: [.control, .option, .command])
+            Button(L(showChat ? "Hide Chat" : "Show Chat")) { model.releaseRemoteInput(); showChat.toggle() }
+                .keyboardShortcut("c", modifiers: [.control, .option, .command])
+                .disabled(!model.tools.isActive)
+            Divider()
+            Toggle(L("Control Remote Computer"), isOn: Binding(
+                get: { model.controlEnabled }, set: { model.setControlEnabled($0) }))
+                .keyboardShortcut("r", modifiers: [.control, .option, .command])
+                .disabled(model.phase != .connected || model.remoteInfo?.allowsRemoteInput != true)
+            Toggle(L("Send Keyboard Shortcuts to Other Computer"), isOn: Binding(
+                get: { forwardShortcuts }, set: { model.releaseRemoteInput(); forwardShortcuts = $0 }))
+                .keyboardShortcut("k", modifiers: [.control, .option, .command])
+            Divider()
+            Button(L("Toggle Full Screen")) { model.releaseRemoteInput(); NSApp.keyWindow?.toggleFullScreen(nil) }
+                .keyboardShortcut("f", modifiers: [.control, .command])
+            Divider()
+        }
     }
 }
