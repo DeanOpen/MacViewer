@@ -77,6 +77,9 @@ struct SessionToolsView: View {
             }
             Divider()
             HStack(alignment: .bottom, spacing: 6) {
+                Button(action: chooseFiles) { Image(systemName: "paperclip") }
+                    .buttonStyle(.borderless).disabled(!tools.canTransferFiles)
+                    .help("Send a file")
                 TextField("Message", text: $tools.draft, axis: .vertical)
                     .font(.system(size: 12)).lineLimit(1...3).textFieldStyle(.roundedBorder)
                     .focused($draftFocused).disabled(!tools.isActive)
@@ -91,6 +94,23 @@ struct SessionToolsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { draftFocused = tools.isActive }
+        // Drop files anywhere on the chat to send them.
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard tools.canTransferFiles, !files.isEmpty else { return false }
+            tools.sendFiles(files)
+            return true
+        }
+    }
+
+    private func chooseFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = L("Send")
+        guard panel.runModal() == .OK else { return }
+        tools.sendFiles(panel.urls)
     }
 
     private var transcript: some View {
@@ -98,7 +118,13 @@ struct SessionToolsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 5) {
                     ForEach(tools.messages) { message in
-                        messageRow(message).id(message.id)
+                        Group {
+                            if let id = message.transferID, let transfer = tools.transfers[id] {
+                                fileRow(message, transfer)
+                            } else {
+                                messageRow(message)
+                            }
+                        }.id(message.id)
                     }
                 }
                 .padding(9).frame(maxWidth: .infinity, alignment: .leading)
@@ -112,6 +138,53 @@ struct SessionToolsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func fileRow(_ message: SessionChatMessage, _ transfer: SessionFileTransfer) -> some View {
+        let sender = message.isOutgoing ? L("You") : peerName
+        let time = Self.timeFormatter.string(from: message.timestamp)
+        let size = ByteCountFormatter.string(fromByteCount: transfer.size, countStyle: .file)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(sender) (\(time)):").font(.system(size: 12)).bold()
+            HStack(alignment: .top, spacing: 8) {
+                Image(nsImage: NSWorkspace.shared.icon(for: .init(filenameExtension: (transfer.name as NSString).pathExtension) ?? .data))
+                    .resizable().frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(transfer.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                    Text(fileStatus(transfer, size: size)).font(.system(size: 10)).foregroundStyle(.secondary)
+                    if transfer.state == .transferring {
+                        ProgressView(value: transfer.fraction).controlSize(.small)
+                    }
+                    HStack(spacing: 6) {
+                        if transfer.state == .offered {
+                            Button("Save") { tools.saveFile(transfer.id) }.buttonStyle(.borderedProminent)
+                        }
+                        if !transfer.isFinished {
+                            Button("Cancel") { tools.cancelFile(transfer.id) }.buttonStyle(.bordered)
+                        }
+                        if !transfer.isOutgoing, transfer.state == .completed {
+                            Button("Show in Finder") { tools.revealFile(transfer.id) }.buttonStyle(.bordered)
+                        }
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(7)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func fileStatus(_ transfer: SessionFileTransfer, size: String) -> String {
+        switch transfer.state {
+        case .offered: return size
+        case .waiting: return LF("%@ · Waiting for the other computer…", size)
+        case .transferring:
+            return LF("%@ of %@", ByteCountFormatter.string(fromByteCount: transfer.bytes, countStyle: .file), size)
+        case .completed: return LF(transfer.isOutgoing ? "%@ · Sent" : "%@ · Saved", size)
+        case .canceled: return LF("%@ · Canceled", size)
+        case let .failed(reason): return "\(size) · \(L(reason))"
+        }
     }
 
     private func messageRow(_ message: SessionChatMessage) -> some View {

@@ -75,6 +75,11 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                             monitors: info.monitors, virtualLeft: info.virtualLeft, virtualTop: info.virtualTop)))
                         pair.continuation.yield(.inputPermissionChanged(info.allowsRemoteInput))
                     case let .chat(text): pair.continuation.yield(.chat(text))
+                    case let .fileOffer(offer):
+                        pair.continuation.yield(.fileOffer(transferID: offer.transferID, name: offer.fileName, size: offer.size))
+                    case let .fileProgress(id, bytes): pair.continuation.yield(.fileProgress(transferID: id, bytes: bytes))
+                    case let .fileCompleted(id): pair.continuation.yield(.fileCompleted(transferID: id))
+                    case let .fileCanceled(id): pair.continuation.yield(.fileCanceled(transferID: id))
                     case let .typing(typing): pair.continuation.yield(.typing(typing))
                     case let .clipboard(text): pair.continuation.yield(.clipboard(text))
                     case let .computerAudio(pcm): pair.continuation.yield(.computerAudio(pcm))
@@ -130,6 +135,20 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
     func sendTyping(_ typing: Bool) async throws {
         guard let engine else { throw UltraViewerRelaySession.Failure.notConnected }
         try await engine.sendTyping(typing)
+    }
+
+    func sendFile(_ url: URL) async throws -> String {
+        guard let engine else { throw UltraViewerRelaySession.Failure.notConnected }
+        return try await engine.sendFile(url).transferID
+    }
+
+    func acceptFile(_ transferID: String, to destination: URL) async throws {
+        guard let engine else { throw UltraViewerRelaySession.Failure.notConnected }
+        try await engine.acceptFile(transferID, to: destination)
+    }
+
+    func cancelFile(_ transferID: String) async throws {
+        try await engine?.cancelFile(transferID)
     }
 
     func sendCommand(_ message: RemoteControlCommands.Message, requiresControl: Bool) async throws {

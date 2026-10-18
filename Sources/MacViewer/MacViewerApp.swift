@@ -107,6 +107,22 @@ struct MacViewerSettings: View {
                     .disabled(model.recentPartners.isEmpty)
                 Button("Forget saved passwords", action: model.forgetSavedPasswords)
             }
+            Section("Received files") {
+                LabeledContent("Save to") {
+                    Text(ReceivedFilesFolder.current().map { ($0.path as NSString).abbreviatingWithTildeInPath }
+                         ?? L("Ask when the first file arrives"))
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Choose Folder…") { _ = ReceivedFilesFolder.choose() }
+                    if let folder = ReceivedFilesFolder.current() {
+                        Button("Show in Finder") { NSWorkspace.shared.open(folder) }
+                    }
+                }
+                Text("Files you save from chat go straight into this folder. Names are never overwritten.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .id(receivedFolder)
             Section("Clipboard") {
                 Toggle("Share clipboard with the other computer", isOn: $shareClipboard)
                 Text("Text copied on either computer can be pasted on the other. Applies to new sessions.")

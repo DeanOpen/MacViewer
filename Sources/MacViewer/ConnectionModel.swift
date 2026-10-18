@@ -470,7 +470,16 @@ final class ConnectionModel: ObservableObject {
             }, sendTyping: { [weak self] typing in
                 guard let self, generation == token, phase == .connected else { throw CancellationError() }
                 try await adapter.sendTyping(typing)
-            })
+            }, files: SessionFileActions(send: { [weak self] url in
+                guard let self, generation == token, phase == .connected else { throw CancellationError() }
+                return try await adapter.sendFile(url)
+            }, accept: { [weak self] id, destination in
+                guard let self, generation == token, phase == .connected else { throw CancellationError() }
+                try await adapter.acceptFile(id, to: destination)
+            }, cancel: { [weak self] id in
+                guard let self, generation == token else { return }
+                try await adapter.cancelFile(id)
+            }))
         case let .frame(newFrame):
             guard phase == .connected else { return }
             frame = newFrame
@@ -500,6 +509,10 @@ final class ConnectionModel: ObservableObject {
             }
         case let .disconnected(reason):
             endSession(message: reason ?? "The remote computer disconnected.")
+        case let .fileOffer(id, name, size): tools.receiveFileOffer(id: id, name: name, size: size)
+        case let .fileProgress(id, bytes): tools.fileProgress(id, bytes: bytes)
+        case let .fileCompleted(id): tools.fileCompleted(id)
+        case let .fileCanceled(id): tools.fileCanceled(id)
         case let .chat(text): tools.receiveChat(text)
         case let .typing(typing): tools.receiveTyping(typing)
         case let .clipboard(text): tools.receiveClipboard(text)
