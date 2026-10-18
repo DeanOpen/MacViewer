@@ -57,7 +57,7 @@ enum MacRegistrationProfile {
     private static let storageLock = NSLock()
     private static let maximumProfileBytes = 65_536
 
-    static func loadOrCreate(forHosting: Bool = false) throws -> ClientRegistration.Request {
+    static func loadOrCreate(forHosting: Bool = false, regeneratePassword: Bool = false) throws -> ClientRegistration.Request {
         guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
                                                      in: .userDomainMask).first else {
             throw ProfileError.invalidStorageLocation
@@ -67,11 +67,12 @@ enum MacRegistrationProfile {
         let process = ProcessInfo.processInfo
         let environment = Environment(network: try discoverNetwork(), hostName: customDisplayName() ?? process.hostName,
                                       userName: NSUserName(), operatingSystem: process.operatingSystemVersion)
-        return try loadOrCreate(in: directory, environment: environment)
+        return try loadOrCreate(in: directory, environment: environment, regeneratePassword: regeneratePassword)
     }
 
     /// Injected location/platform values keep tests away from the user's profile.
-    static func loadOrCreate(in directory: URL, environment: Environment) throws -> ClientRegistration.Request {
+    static func loadOrCreate(in directory: URL, environment: Environment,
+                             regeneratePassword: Bool = false) throws -> ClientRegistration.Request {
         storageLock.lock()
         defer { storageLock.unlock() }
         let manager = FileManager.default
@@ -102,10 +103,11 @@ enum MacRegistrationProfile {
                   stored.password.utf8.allSatisfy({ (48...57).contains($0) }) else {
                 throw ProfileError.invalidStoredProfile
             }
-            credentials = Credentials(deviceIdentity: stored.deviceIdentity, password: stored.password)
+            // A new password keeps the same device identity, and so the same ID.
+            credentials = Credentials(deviceIdentity: stored.deviceIdentity,
+                                      password: regeneratePassword ? newPassword() : stored.password)
         } else {
-            credentials = Credentials(deviceIdentity: deviceIdentity(for: UUID()),
-                                      password: (0..<8).map { _ in String(Int.random(in: 0...9)) }.joined())
+            credentials = Credentials(deviceIdentity: deviceIdentity(for: UUID()), password: newPassword())
         }
         let request = makeRequest(credentials: credentials, environment: environment)
         // Check the real codec's field/encoding constraints before persistence.
@@ -118,6 +120,10 @@ enum MacRegistrationProfile {
         try bytes.write(to: destination, options: .atomic)
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
         return request
+    }
+
+    private static func newPassword() -> String {
+        (0..<8).map { _ in String(Int.random(in: 0...9)) }.joined()
     }
 
     static func deviceIdentity(for installationUUID: UUID) -> String {

@@ -85,3 +85,24 @@ import UltraViewerProtocol
     defaults.set("Mac Văn Phòng", forKey: MacRegistrationProfile.displayNameKey)
     #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "Mac Van Phong")
 }
+
+@Test func macRegistrationProfileNewPasswordKeepsTheDeviceIdentity() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("MacViewer-profile-reset-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let environment = MacRegistrationProfile.Environment(
+        network: .init(address: try RelayIPv4Address("192.0.2.5"), macAddress: "020000000001"),
+        hostName: "Mac", userName: "dean", operatingSystem: .init(majorVersion: 26, minorVersion: 0, patchVersion: 1))
+    let first = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment)
+    let same = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment)
+    #expect(same.password == first.password)
+    var changed = first
+    for _ in 0..<5 where changed.password == first.password {
+        changed = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment, regeneratePassword: true)
+    }
+    #expect(changed.deviceIdentity == first.deviceIdentity)
+    #expect(changed.password != first.password)
+    #expect(changed.password.count == 8 && changed.password.allSatisfy(\.isNumber))
+    // The new password is what later launches load.
+    #expect(try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment).password == changed.password)
+}

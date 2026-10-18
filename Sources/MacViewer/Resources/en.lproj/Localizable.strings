@@ -455,3 +455,10 @@
 "Choose a computer to reuse its connection details. Use the pencil to rename it." = "Choose a computer to reuse its connection details. Use the pencil to rename it.";
 "Rename this computer" = "Rename this computer";
 "Rename" = "Rename";
+"Copy your password" = "Copy your password";
+"Make a new password" = "Make a new password";
+"End the current connection to change the password" = "End the current connection to change the password";
+"Make a new password?" = "Make a new password?";
+"New Password" = "New Password";
+"The old password stops working. Your Mac’s ID stays the same." = "The old password stops working. Your Mac’s ID stays the same.";
+"A new password could not be created: %@" = "A new password could not be created: %@";

@@ -31,6 +31,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
                 ("The remote action could not be completed: ", "", "The remote action could not be completed: %@"),
                 ("Connected, but the password could not be saved: ", "", "Connected, but the password could not be saved: %@"),
                 ("Saved passwords could not be removed: ", "", "Saved passwords could not be removed: %@"),
+                ("A new password could not be created: ", "", "A new password could not be created: %@"),
                 ("Saved password unavailable: ", " Enter it manually.", "Saved password unavailable: %@ Enter it manually.")] {
             if key != format, key.hasPrefix(prefix), key.hasSuffix(suffix), key.count > prefix.count + suffix.count {
                 let value = String(key.dropFirst(prefix.count).dropLast(suffix.count))

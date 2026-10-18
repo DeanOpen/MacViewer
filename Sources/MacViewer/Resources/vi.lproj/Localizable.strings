@@ -455,3 +455,10 @@
 "Choose a computer to reuse its connection details. Use the pencil to rename it." = "Chọn một máy để dùng lại thông tin kết nối. Bấm biểu tượng bút chì để đổi tên.";
 "Rename this computer" = "Đổi tên máy này";
 "Rename" = "Đổi tên";
+"Copy your password" = "Sao chép mật khẩu";
+"Make a new password" = "Tạo mật khẩu mới";
+"End the current connection to change the password" = "Hãy kết thúc kết nối hiện tại để đổi mật khẩu";
+"Make a new password?" = "Tạo mật khẩu mới?";
+"New Password" = "Mật khẩu mới";
+"The old password stops working. Your Mac’s ID stays the same." = "Mật khẩu cũ sẽ không dùng được nữa. ID của máy Mac giữ nguyên.";
+"A new password could not be created: %@" = "Không tạo được mật khẩu mới: %@";

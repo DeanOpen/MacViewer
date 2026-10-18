@@ -19,6 +19,9 @@ struct ConnectionView: View {
     @State private var readMessages = 0
     @State private var remoteWallpaperVisible = true
     @State private var revealPassword = false
+    @State private var confirmPasswordReset = false
+    @State private var renamingPartner: String?
+    @State private var partnerNameDraft = ""
     @FocusState private var focusedField: Field?
     @Environment(\.locale) private var appLocale
     @State private var confirmSideSwitch = false
@@ -301,11 +304,22 @@ struct ConnectionView: View {
                             Button { revealPassword.toggle() } label: {
                                 Label(LocalizedStringKey(revealPassword ? "Hide" : "Show"), systemImage: revealPassword ? "eye.slash" : "eye")
                             }.buttonStyle(.borderless)
+                            Button { copy(hosting.password) } label: { Image(systemName: "doc.on.doc") }
+                                .buttonStyle(.borderless).help("Copy your password")
+                            Button { confirmPasswordReset = true } label: { Image(systemName: "arrow.clockwise") }
+                                .buttonStyle(.borderless).disabled(!hosting.canResetPassword)
+                                .help(hosting.canResetPassword ? "Make a new password" : "End the current connection to change the password")
                         } else {
                             Label("Available after starting sharing", systemImage: "lock")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                    .confirmationDialog("Make a new password?", isPresented: $confirmPasswordReset, titleVisibility: .visible) {
+                        Button("New Password") { hosting.resetPassword() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("The old password stops working. Your Mac’s ID stays the same.")
+                    }
                 }
                 } else {
                     HStack(spacing: 8) {
