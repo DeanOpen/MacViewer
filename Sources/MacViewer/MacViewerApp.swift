@@ -94,6 +94,7 @@ struct MacViewerSettings: View {
                 LabeledContent("Application", value: "MacViewer \(Self.version)")
                 LabeledContent("Author", value: MacViewerAbout.author)
                 Link("github.com/DeanOpen/MacViewer", destination: MacViewerAbout.repository)
+                Link("UltraViewer (ultraviewer.net)", destination: MacViewerAbout.ultraViewer)
                 Toggle("Automatically check for updates", isOn: $checkForUpdates)
                 Button(L("Check for Updates…")) { updater.check(userInitiated: true) }
                     .disabled(updater.state == .checking)
@@ -155,6 +156,7 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
 enum MacViewerAbout {
     static let author = "DeanOpen"
     static let repository = URL(string: "https://github.com/DeanOpen/MacViewer")!
+    static let ultraViewer = URL(string: "https://ultraviewer.net")!
 
     @MainActor
     static func show() {
@@ -168,6 +170,9 @@ enum MacViewerAbout {
         link[.link] = repository
         link[.foregroundColor] = NSColor.linkColor
         credits.append(NSAttributedString(string: "github.com/DeanOpen/MacViewer", attributes: link))
+        credits.append(NSAttributedString(string: "\n\n" + L("Works with") + " ", attributes: body))
+        link[.link] = ultraViewer
+        credits.append(NSAttributedString(string: "UltraViewer", attributes: link))
         NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
         NSApp.activate()
     }
