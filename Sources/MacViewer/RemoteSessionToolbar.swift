@@ -85,7 +85,7 @@ struct RemoteSessionToolbar: View {
                                toggleSidebar: callbacks.toggleChat)
             Divider().frame(height: 23)
             Toggle(isOn: $forwardShortcuts) { Image(systemName: "command") }
-                .toggleStyle(.button).disabled(!controlEnabled)
+                .toggleStyle(.button)
                 .help(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts go to the other computer. Click to keep them on this Mac."
                                        : "⌘ shortcuts stay on this Mac. Click to send them to the other computer."))
                 .accessibilityLabel("Send keyboard shortcuts to the other computer")
@@ -169,7 +169,6 @@ struct RemoteSessionToolbar: View {
             Toggle("Smooth scaling", isOn: $smoothScaling)
             Divider()
             Toggle("Send keyboard shortcuts to the other computer", isOn: $forwardShortcuts)
-                .disabled(!controlEnabled)
             Toggle("View only", isOn: Binding(get: { !controlEnabled }, set: { controlEnabled = !$0 }))
                 .disabled(!allowsControl)
             if let setWallpaper = callbacks.setWallpaper {

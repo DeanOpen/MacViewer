@@ -511,6 +511,19 @@ struct ConnectionView: View {
         .help("Show chat")
     }
 
+    /// Stays visible over the remote screen so a hidden toolbar can always be reopened.
+    private var toolbarEdgeTab: some View {
+        Button { showSessionToolbar = true } label: {
+            Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
+                .frame(width: 44, height: 16)
+                .background(.regularMaterial, in: UnevenRoundedRectangle(bottomLeadingRadius: 8, bottomTrailingRadius: 8))
+                .shadow(radius: 2)
+        }
+        .buttonStyle(.plain)
+        .help("Show toolbar")
+        .accessibilityLabel("Show toolbar")
+    }
+
     private var remoteSession: some View {
         VStack(spacing: 0) {
             if showSessionToolbar {
@@ -559,6 +572,7 @@ struct ConnectionView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) { if !showSessionToolbar { toolbarEdgeTab } }
                 .overlay(alignment: .trailing) { if !showChatSidebar { chatEdgeTab } }
                 if showChatSidebar {
                     Divider()
@@ -578,17 +592,19 @@ struct ConnectionView: View {
                 Text(L(model.status)).lineLimit(1)
                 Spacer()
                 if let frame = model.frame { Text("\(frame.image.width) × \(frame.image.height)").monospacedDigit() }
-                if model.controlEnabled {
-                    Button {
-                        model.releaseRemoteInput(); forwardShortcuts.toggle()
-                    } label: {
-                        Label(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts → other computer" : "⌘ shortcuts → this Mac"),
-                              systemImage: "command")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Click to choose where ⌘ keyboard shortcuts go")
+                Button {
+                    model.releaseRemoteInput(); forwardShortcuts.toggle()
+                } label: {
+                    Label(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts → other computer" : "⌘ shortcuts → this Mac"),
+                          systemImage: "command")
                 }
-                Text(LocalizedStringKey(model.controlEnabled ? "Keyboard & mouse enabled" : "View only · Change in Configuration"))
+                .buttonStyle(.borderless)
+                .help("Click to choose where ⌘ keyboard shortcuts go")
+                Button(LocalizedStringKey(model.controlEnabled ? "Keyboard & mouse enabled" : "View only · Click to control")) {
+                    model.setControlEnabled(!model.controlEnabled)
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.phase != .connected || model.remoteInfo?.allowsRemoteInput != true)
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 5).background(.bar)
         }
     }
