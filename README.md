@@ -45,8 +45,9 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 - Điều khiển chuột, bàn phím (chỉ khi bạn bật **Điều khiển**). Phím được chuyển
   đổi sẵn: <kbd>⌘</kbd> → Win, <kbd>⌥</kbd> → Alt, <kbd>⌃</kbd> → Ctrl. Cuộn
   bằng trackpad hay chuột đều được
-- **Gõ tiếng Việt** khi điều khiển: dùng bộ gõ của macOS (Telex/VNI, EVKey…)
-  hoặc tắt bộ gõ trên Mac và dùng Unikey ở máy kia
+- **Gõ tiếng Việt, tiếng Trung** khi điều khiển: dùng bộ gõ của macOS
+  (Telex/VNI, EVKey, Pinyin…). Với tiếng Việt cũng có thể tắt bộ gõ trên Mac và
+  dùng Unikey ở máy kia
 - Thanh công cụ: chọn màn hình, thu phóng, chất lượng hình, ẩn/hiện hình nền,
   con trỏ chuột và **nghe âm thanh từ máy kia**
 - Chụp màn hình (chọn vùng, ghi chú lên ảnh) và **quay video**
@@ -69,8 +70,8 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 
 Gửi file, nói chuyện qua micro, phát âm thanh khi chia sẻ máy Mac, chia sẻ
 nhiều màn hình Mac cùng lúc và truy cập không cần người ngồi máy. Chưa thử
-nghiệm với các bản UltraViewer cũ, bàn phím không phải kiểu US, bộ gõ khác
-tiếng Việt và chế độ màu 8-bit.
+nghiệm với các bản UltraViewer cũ, bàn phím không phải kiểu US, bộ gõ ngoài
+tiếng Việt và tiếng Trung, và chế độ màu 8-bit.
 
 ## Cài đặt
 

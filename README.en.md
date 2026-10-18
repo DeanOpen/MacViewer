@@ -45,8 +45,9 @@ Windows executable code.
 - Keyboard and mouse control that you turn on yourself:
   <kbd>⌘</kbd> → Win, <kbd>⌥</kbd> → Alt, <kbd>⌃</kbd> → Ctrl,
   with trackpad and wheel scrolling
-- **Vietnamese typing** while controlling: use a macOS input method
-  (Telex/VNI, EVKey…), or turn it off and use Unikey on the remote PC
+- **Vietnamese and Chinese typing** while controlling: use a macOS input
+  method (Telex/VNI, EVKey, Pinyin…). For Vietnamese you can also turn it off
+  and use Unikey on the remote PC
 - Toolbar with monitor selection, scaling, quality, wallpaper, remote cursor
   and **remote computer audio**
 - Screenshots with region selection and annotations, and **video recording**
@@ -71,8 +72,8 @@ Windows executable code.
 
 File transfer, microphone/voice chat, Mac-host audio, sharing more than one Mac
 display, and unattended Mac access. Older Windows UltraViewer versions,
-non-US keyboard layouts, input methods other than Vietnamese and 8-bit screen
-mode haven't been validated.
+non-US keyboard layouts, input methods other than Vietnamese and Chinese,
+and 8-bit screen mode haven't been validated.
 
 ## Installation
 
