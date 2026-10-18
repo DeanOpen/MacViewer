@@ -91,6 +91,9 @@ enum RemoteInput: Sendable, Equatable {
     case scroll(deltaX: Double, deltaY: Double)
     /// `keyCode` is the macOS hardware code; the adapter translates it for the peer.
     case key(keyCode: UInt16, characters: String?, pressed: Bool, modifiers: RemoteModifiers)
+    /// Text committed by a macOS input method (e.g. Vietnamese Telex) that has no
+    /// US key equivalent; the adapter types it on the peer as Unicode units.
+    case text(String)
     case modifiers(RemoteModifiers)
     /// Release held remote keys/buttons on focus loss, control toggle, or disconnect.
     case releaseAll
