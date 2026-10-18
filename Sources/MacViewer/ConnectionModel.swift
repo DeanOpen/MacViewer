@@ -33,6 +33,7 @@ final class ConnectionModel: ObservableObject {
 
     static let rememberPartnersKey = "MacViewer.rememberPartners"
     static let rememberPasswordKey = "MacViewer.rememberPassword"
+    static let computerAudioKey = "MacViewer.computerAudio"
     private static let recentPartnersKey = "MacViewer.recentPartners"
 
     @Published var partnerID = "" {
@@ -273,7 +274,10 @@ final class ConnectionModel: ObservableObject {
         sendCommands([RemoteControlCommands.cursorPositions(enabled: enabled)], requiresControl: false)
     }
 
-    func setComputerAudioEnabled(_ enabled: Bool) { requestAudio(enabled, clearError: true) }
+    func setComputerAudioEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.computerAudioKey)
+        requestAudio(enabled, clearError: true)
+    }
 
     private func requestAudio(_ enabled: Bool, clearError: Bool) {
         guard phase == .connected else { return }
@@ -423,6 +427,7 @@ final class ConnectionModel: ObservableObject {
             phase = .connected
             status = "Connected to \(info.displayName ?? info.partnerID)."
             rememberPartner(info.partnerID)
+            if defaults.bool(forKey: Self.computerAudioKey) { requestAudio(true, clearError: false) }
             if let pending = pendingCredential {
                 pendingCredential = nil
                 if rememberPassword, Self.normalizeID(info.partnerID) == pending.identifier {

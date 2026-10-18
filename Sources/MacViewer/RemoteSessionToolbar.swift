@@ -65,6 +65,7 @@ struct RemoteSessionToolbar: View {
     @State private var confirmRestart = false
     @State private var showCustomQuality = false
     @State private var customQuality = 45.0
+    @AppStorage(RemoteAudioPlayer.volumeKey) private var audioVolume = 1.0
 
     var body: some View {
         HStack(spacing: 10) {
@@ -181,6 +182,11 @@ struct RemoteSessionToolbar: View {
             if let setAudio = callbacks.setComputerAudioEnabled {
                 Toggle("Computer audio", isOn: Binding(get: { callbacks.computerAudioEnabled }, set: { setAudio($0) }))
                     .disabled(callbacks.isChangingAudio || !isConnected)
+                Picker("Audio volume", selection: $audioVolume) {
+                    Text("Mute").tag(0.0)
+                    ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { Text($0, format: .percent).tag($0) }
+                }
+                .disabled(!callbacks.computerAudioEnabled)
             }
             if let setQuality = callbacks.setImageQuality {
                 Divider()
