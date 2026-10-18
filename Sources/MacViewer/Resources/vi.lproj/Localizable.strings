@@ -356,3 +356,5 @@
 "Author" = "Tác giả";
 "Made by" = "Phát triển bởi";
 "Works with" = "Tương thích với";
+"Send keyboard shortcuts to the other computer" = "Gửi phím tắt sang máy kia";
+"When off, ⌘ shortcuts stay on this Mac." = "Khi tắt, các phím tắt ⌘ chỉ tác dụng trên máy Mac này.";

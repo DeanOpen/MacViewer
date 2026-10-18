@@ -27,6 +27,7 @@ struct RemoteScreenView: NSViewRepresentable {
 }
 
 final class RemoteScreenNSView: NSView {
+    static let forwardShortcutsKey = "MacViewer.forwardShortcuts"
     var image: CGImage?
     var smoothScaling = true
     var scrollSensitivity = 1.0
@@ -140,8 +141,19 @@ final class RemoteScreenNSView: NSView {
                 precise: event.hasPreciseScrollingDeltas, sensitivity: scrollSensitivity)))
     }
 
+    /// When off, Command-key combinations stay on this Mac (menus, app
+    /// switching, copy/paste) instead of going to the other computer.
+    private var forwardsShortcuts: Bool {
+        UserDefaults.standard.object(forKey: Self.forwardShortcutsKey) as? Bool ?? true
+    }
+
+    private func keepsLocally(_ event: NSEvent) -> Bool {
+        !forwardsShortcuts && event.modifierFlags.contains(.command)
+    }
+
     override func keyDown(with event: NSEvent) {
         guard inputEnabled else { return }
+        guard !keepsLocally(event) else { super.keyDown(with: event); return }
         // Shortcuts keep the physical-key path. Other keys go through the input
         // method first so Vietnamese (Telex/VNI) and other IMEs can compose text.
         if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
@@ -186,7 +198,7 @@ final class RemoteScreenNSView: NSView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard inputEnabled, window?.firstResponder === self,
-              event.type == .keyDown, event.modifierFlags.contains(.command) else {
+              event.type == .keyDown, event.modifierFlags.contains(.command), forwardsShortcuts else {
             return super.performKeyEquivalent(with: event)
         }
         keyDown(with: event)
@@ -236,7 +248,7 @@ final class RemoteScreenNSView: NSView {
         if event.modifierFlags.contains(.shift) { result.insert(.shift) }
         if event.modifierFlags.contains(.control) { result.insert(.control) }
         if event.modifierFlags.contains(.option) { result.insert(.option) }
-        if event.modifierFlags.contains(.command) { result.insert(.command) }
+        if event.modifierFlags.contains(.command), forwardsShortcuts { result.insert(.command) }
         if event.modifierFlags.contains(.capsLock) { result.insert(.capsLock) }
         return result
     }

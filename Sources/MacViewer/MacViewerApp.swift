@@ -55,6 +55,7 @@ struct MacViewerSettings: View {
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
     @AppStorage(UpdateChecker.automaticKey) private var checkForUpdates = true
     @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = true
+    @AppStorage(RemoteScreenNSView.forwardShortcutsKey) private var forwardShortcuts = true
 
     var body: some View {
         Form {
@@ -85,6 +86,9 @@ struct MacViewerSettings: View {
             }
             Section("Remote screen") {
                 Toggle("Smooth image scaling", isOn: $smoothScreen)
+                Toggle("Send keyboard shortcuts to the other computer", isOn: $forwardShortcuts)
+                Text("When off, ⌘ shortcuts stay on this Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Slider(value: $scrollSensitivity, in: 0.25...2, step: 0.25) {
                     Text("Scroll speed")
                 }
