@@ -112,6 +112,8 @@
 "Show remote wallpaper" = "Show remote wallpaper";
 "Show remote cursor" = "Show remote cursor";
 "Computer audio" = "Computer audio";
+"Audio volume" = "Audio volume";
+"Mute" = "Mute";
 "Automatic" = "Automatic";
 "Prefer speed" = "Prefer speed";
 "Prefer image quality" = "Prefer image quality";

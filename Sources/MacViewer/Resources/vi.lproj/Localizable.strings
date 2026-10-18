@@ -112,6 +112,8 @@
 "Show remote wallpaper" = "Hiện hình nền từ xa";
 "Show remote cursor" = "Hiện chuột từ xa";
 "Computer audio" = "Âm thanh máy tính";
+"Audio volume" = "Âm lượng";
+"Mute" = "Tắt tiếng";
 "Automatic" = "Tự động";
 "Prefer speed" = "Ưu tiên tốc độ";
 "Prefer image quality" = "Ưu tiên chất lượng";

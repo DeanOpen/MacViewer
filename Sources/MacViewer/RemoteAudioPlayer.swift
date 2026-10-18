@@ -19,6 +19,7 @@ final class RemoteAudioPlayer {
         }
     }
 
+    static let volumeKey = "MacViewer.audioVolume"
     private static let sampleRate = 48_000.0
     private static let maximumQueuedFrames = 12_000 // 250ms at the source rate.
     private let engine = AVAudioEngine()
@@ -93,6 +94,7 @@ final class RemoteAudioPlayer {
                 channels[1][frame] = Float(right) / 32_768
             }
         }
+        player.volume = Float(UserDefaults.standard.object(forKey: Self.volumeKey) as? Double ?? 1)
         let activeGeneration = generation
         queuedFrames += frames
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in

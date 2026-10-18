@@ -448,6 +448,23 @@ struct ConnectionModelTests {
         #expect(!audio.enabled && !model.computerAudioEnabled && !model.isChangingAudio)
     }
 
+    @Test("A remembered audio choice turns computer audio on at the next connection")
+    func rememberedAudioEnablesOnConnect() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        defaults.set(true, forKey: ConnectionModel.computerAudioKey)
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults, credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789")))
+        try await settle { model.computerAudioEnabled }
+        #expect(adapter.audioRequests == [true])
+        model.setComputerAudioEnabled(false)
+        #expect(!defaults.bool(forKey: ConnectionModel.computerAudioKey))
+        model.disconnect()
+    }
+
     private func isolatedDefaults() throws -> UserDefaults {
         let suite = "MacViewerTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
