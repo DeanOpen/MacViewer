@@ -343,3 +343,12 @@
 "Updating restarts MacViewer and ends current connections." = "Cập nhật sẽ khởi động lại MacViewer và ngắt các kết nối hiện tại.";
 "Share clipboard with the other computer" = "Chia sẻ bảng nhớ tạm với máy kia";
 "Text copied on either computer can be pasted on the other. Applies to new sessions." = "Chữ copy ở máy này có thể dán ở máy kia và ngược lại. Áp dụng cho các phiên kết nối mới.";
+"Sent to the other computer" = "Đã gửi sang máy kia";
+"Copied from the other computer" = "Đã copy từ máy kia";
+"Share clipboard" = "Chia sẻ bảng nhớ tạm";
+"Nothing shared yet. Copy text on either computer." = "Chưa có gì. Hãy copy chữ ở một trong hai máy.";
+"Recent" = "Gần đây";
+"Sent from this Mac. Click to copy again." = "Đã gửi từ máy Mac này. Bấm để copy lại.";
+"Received from the other computer. Click to copy." = "Nhận từ máy kia. Bấm để copy.";
+"Chat with %@" = "Trò chuyện với %@";
+"Show chat" = "Hiện trò chuyện";

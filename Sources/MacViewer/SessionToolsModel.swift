@@ -2,6 +2,14 @@ import AppKit
 import Combine
 import Foundation
 
+/// Text that crossed the shared clipboard during this session.
+struct SessionClipboardEntry: Identifiable, Equatable {
+    let id = UUID()
+    let timestamp = Date()
+    let text: String
+    let isOutgoing: Bool
+}
+
 struct SessionChatMessage: Identifiable, Equatable {
     let id = UUID()
     let timestamp = Date()
@@ -23,6 +31,11 @@ final class SessionToolsModel: ObservableObject {
     @Published private(set) var isUpdatingClipboard = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var clipboardStatus = "Clipboard sharing is off."
+    /// Newest first, at most 20 items; cleared when the session ends.
+    @Published private(set) var clipboardHistory: [SessionClipboardEntry] = []
+    /// Short-lived notice after text is shared ("Copied from…", "Sent to…").
+    @Published private(set) var clipboardNotice: String?
+    private var noticeTask: Task<Void, Never>?
 
     typealias SendText = @MainActor (String) async throws -> Void
     typealias SetSharing = @MainActor (Bool) async throws -> Void
@@ -74,6 +87,26 @@ final class SessionToolsModel: ObservableObject {
         isActive = false; isSending = false; clipboardEnabled = false; isUpdatingClipboard = false
         latestClipboardText = nil
         clipboardStatus = "Clipboard sharing is off."
+        clipboardHistory = []
+        noticeTask?.cancel(); noticeTask = nil; clipboardNotice = nil
+    }
+
+    /// Puts an earlier shared item back on this Mac's clipboard.
+    func copyToMac(_ entry: SessionClipboardEntry) {
+        pasteboard.clearContents()
+        pasteboard.setString(entry.text, forType: .string)
+    }
+
+    private func recordClipboard(_ text: String, outgoing: Bool) {
+        clipboardHistory.insert(SessionClipboardEntry(text: text, isOutgoing: outgoing), at: 0)
+        if clipboardHistory.count > 20 { clipboardHistory.removeLast(clipboardHistory.count - 20) }
+        clipboardNotice = outgoing ? "Sent to the other computer" : "Copied from the other computer"
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.clipboardNotice = nil
+        }
     }
 
     func sendDraft() {
@@ -167,6 +200,7 @@ final class SessionToolsModel: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         clipboardChange = pasteboard.changeCount
+        recordClipboard(text, outgoing: false)
     }
 
     private func beginClipboardPolling(token: UUID, revision: UUID) {
@@ -191,8 +225,10 @@ final class SessionToolsModel: ObservableObject {
             errorMessage = "Clipboard text exceeds the 1 MB sharing limit."; return
         }
         latestClipboardText = text
-        do { try await sendClipboard(text) }
-        catch {
+        do {
+            try await sendClipboard(text)
+            if generation == token, clipboardGeneration == revision { recordClipboard(text, outgoing: true) }
+        } catch {
             guard generation == token, clipboardGeneration == revision, !Task.isCancelled else { return }
             errorMessage = "Clipboard text could not be sent."
         }

@@ -33,6 +33,7 @@ struct RemoteSessionToolbarCallbacks {
     var restart: (() -> Void)? = nil
     var setImageQuality: ((RemoteImageQuality) -> Void)? = nil
     var hideToolbar: () -> Void = {}
+    var toggleChat: (() -> Void)? = nil
     var monitors: [RemoteMonitor] = []
     var selectedMonitor = 0
     var selectMonitor: ((Int) -> Void)? = nil
@@ -78,7 +79,9 @@ struct RemoteSessionToolbar: View {
             actionsMenu
             configurationMenu
             captureMenu
-            SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput)
+            SessionClipboardButton(tools: tools)
+            SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput,
+                               toggleSidebar: callbacks.toggleChat)
             Divider().frame(height: 23)
             Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
                 .disabled(!isConnected || !allowsControl).fixedSize()

@@ -13,6 +13,8 @@ struct ConnectionView: View {
     @State private var remoteImageQuality: RemoteImageQuality = .automatic
     @State private var showSession = false
     @State private var showSessionToolbar = true
+    @AppStorage("MacViewer.chatSidebar") private var showChatSidebar = false
+    @State private var readMessages = 0
     @State private var remoteWallpaperVisible = true
     @State private var revealPassword = false
     @FocusState private var focusedField: Field?
@@ -129,6 +131,8 @@ struct ConnectionView: View {
                 }
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Manage Windows access to this Mac")
+                SessionClipboardButton(tools: hosting.tools)
+                    .buttonStyle(.borderless).controlSize(.small)
                 SessionToolsButton(tools: hosting.tools, peerName: incomingPeerName,
                                    title: "Incoming chat", context: "Incoming", onOpen: model.releaseRemoteInput)
                     .controlSize(.small)
@@ -458,6 +462,54 @@ struct ConnectionView: View {
         }
     }
 
+    private var unreadMessages: Int {
+        model.tools.messages.dropFirst(min(readMessages, model.tools.messages.count)).filter { !$0.isOutgoing }.count
+    }
+
+    private func toggleChatSidebar() {
+        model.releaseRemoteInput()
+        showChatSidebar.toggle()
+        if showChatSidebar { readMessages = model.tools.messages.count }
+    }
+
+    /// Chat docked beside the remote screen; collapse it with the chevron.
+    private var chatSidebar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(.secondary)
+                Text("Chat").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button(action: toggleChatSidebar) { Image(systemName: "chevron.right") }
+                    .buttonStyle(.borderless).help("Hide chat")
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            Divider()
+            SessionToolsView(tools: model.tools, peerName: model.remoteInfo?.displayName ?? model.partnerID)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// Slim tab on the screen edge while the chat is hidden; shows unread messages.
+    private var chatEdgeTab: some View {
+        Button(action: toggleChatSidebar) {
+            VStack(spacing: 4) {
+                Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 12))
+                if unreadMessages > 0 {
+                    Text(unreadMessages > 99 ? "99+" : String(unreadMessages))
+                        .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.red, in: Capsule()).foregroundStyle(.white)
+                }
+            }
+            .padding(.vertical, 10).padding(.horizontal, 6)
+            .background(.regularMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8))
+            .shadow(radius: 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.tools.isActive)
+        .help("Show chat")
+    }
+
     private var remoteSession: some View {
         VStack(spacing: 0) {
             if showSessionToolbar {
@@ -475,6 +527,7 @@ struct ConnectionView: View {
                                  restart: { model.performRemoteAction(.restart) },
                                  setImageQuality: model.setImageQuality,
                                  hideToolbar: { model.releaseRemoteInput(); showSessionToolbar = false },
+                                 toggleChat: toggleChatSidebar,
                                  monitors: model.remoteInfo?.monitors ?? [],
                                  selectedMonitor: model.selectedMonitor,
                                  selectMonitor: model.selectMonitor,
@@ -489,16 +542,29 @@ struct ConnectionView: View {
             Divider()
             }
             if let error = model.errorMessage { errorLabel(error).padding(16) }
-            if let frame = model.displayedFrame, model.phase == .connected {
-                RemoteScreenViewport(image: frame.image, displayScale: remoteDisplayScale, smoothScaling: smoothScreen,
-                                     scrollSensitivity: scrollSensitivity, inputEnabled: model.controlEnabled,
-                                     onInput: model.send, cursor: model.remoteCursor)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: 16) {
-                    ProgressView().controlSize(.large)
-                    Text(L(model.status)).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            HStack(spacing: 0) {
+                Group {
+                    if let frame = model.displayedFrame, model.phase == .connected {
+                        RemoteScreenViewport(image: frame.image, displayScale: remoteDisplayScale, smoothScaling: smoothScreen,
+                                             scrollSensitivity: scrollSensitivity, inputEnabled: model.controlEnabled,
+                                             onInput: model.send, cursor: model.remoteCursor)
+                    } else {
+                        VStack(spacing: 16) {
+                            ProgressView().controlSize(.large)
+                            Text(L(model.status)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .trailing) { if !showChatSidebar { chatEdgeTab } }
+                if showChatSidebar {
+                    Divider()
+                    chatSidebar.frame(width: 300).transition(.move(edge: .trailing))
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: showChatSidebar)
+            .onChange(of: model.tools.messages.count) { _, count in
+                if showChatSidebar || count < readMessages { readMessages = count }
             }
             HStack(spacing: 12) {
                 if !showSessionToolbar {

@@ -10,11 +10,14 @@ struct SessionToolsButton: View {
     var title = "Chat"
     var context: String? = nil
     var onOpen: () -> Void = {}
+    /// When set, the button toggles an in-window sidebar instead of the floating window.
+    var toggleSidebar: (() -> Void)? = nil
 
     var body: some View {
         Button {
             onOpen()
-            MacChatWindowController.shared.show(tools, name: peerName, context: context)
+            if let toggleSidebar { toggleSidebar() }
+            else { MacChatWindowController.shared.show(tools, name: peerName, context: context) }
         } label: {
             HStack(spacing: 6) {
                 Label(LocalizedStringKey(title), systemImage: "bubble.left.and.bubble.right")
@@ -26,7 +29,7 @@ struct SessionToolsButton: View {
             }
         }
         .disabled(!tools.isActive)
-        .help("Chat and clipboard with \(peerName)")
+        .help("Chat with \(peerName)")
         .onAppear(perform: register)
         .onChange(of: tools.isActive) { _, _ in register() }
         .onChange(of: peerName) { _, _ in register() }
@@ -85,27 +88,6 @@ struct SessionToolsView: View {
                     .help("Send message (Command-Return)")
             }
             .padding(8)
-            Divider()
-            HStack(spacing: 6) {
-                Toggle("Clipboard", isOn: Binding(
-                    get: { tools.clipboardEnabled }, set: { tools.setClipboardEnabled($0) }))
-                    .toggleStyle(.checkbox).font(.system(size: 11))
-                    .disabled(!tools.isActive || tools.isUpdatingClipboard)
-                    .help("Share newly copied text in both directions")
-                if tools.isUpdatingClipboard { ProgressView().controlSize(.mini) }
-                Spacer(minLength: 3)
-                Menu {
-                    Text("Newly copied text is shared in both directions.")
-                    Text("Existing clipboard contents are not sent when enabling sharing.")
-                    Divider()
-                    Text(L(tools.clipboardStatus))
-                } label: {
-                    Image(systemName: "info.circle").font(.system(size: 11))
-                }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help(L(tools.clipboardStatus))
-            }
-            .padding(.horizontal, 9).padding(.vertical, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { draftFocused = tools.isActive }
@@ -140,5 +122,90 @@ struct SessionToolsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .combine)
+    }
+}
+
+/// Toolbar indicator for the shared clipboard: green while sharing is on,
+/// briefly names the last transfer, and opens the recent-items list.
+@MainActor
+struct SessionClipboardButton: View {
+    @ObservedObject var tools: SessionToolsModel
+    @State private var showList = false
+
+    var body: some View {
+        Button { showList.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: tools.clipboardEnabled ? "doc.on.clipboard.fill" : "doc.on.clipboard")
+                    .foregroundStyle(tools.clipboardEnabled ? .green : .secondary)
+                Text(LocalizedStringKey(tools.clipboardNotice ?? "Clipboard"))
+                    .foregroundStyle(tools.clipboardNotice == nil ? .primary : Color.green)
+                    .lineLimit(1)
+            }
+            .animation(.easeInOut(duration: 0.2), value: tools.clipboardNotice)
+        }
+        .disabled(!tools.isActive)
+        .help(L(tools.clipboardStatus))
+        .popover(isPresented: $showList, arrowEdge: .bottom) {
+            SessionClipboardList(tools: tools).appLanguage()
+        }
+    }
+}
+
+@MainActor
+private struct SessionClipboardList: View {
+    @ObservedObject var tools: SessionToolsModel
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Toggle("Share clipboard", isOn: Binding(
+                    get: { tools.clipboardEnabled }, set: { tools.setClipboardEnabled($0) }))
+                    .toggleStyle(.switch).controlSize(.small)
+                    .disabled(!tools.isActive || tools.isUpdatingClipboard)
+                if tools.isUpdatingClipboard { ProgressView().controlSize(.mini) }
+            }
+            Text(L(tools.clipboardStatus)).font(.caption).foregroundStyle(.secondary)
+            Divider()
+            if tools.clipboardHistory.isEmpty {
+                Text("Nothing shared yet. Copy text on either computer.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            } else {
+                Text("Recent").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(tools.clipboardHistory) { entry in row(entry) }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+        .padding(12)
+        .frame(width: 320)
+    }
+
+    private func row(_ entry: SessionClipboardEntry) -> some View {
+        Button { tools.copyToMac(entry) } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: entry.isOutgoing ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                    .foregroundStyle(entry.isOutgoing ? .blue : .green)
+                Text(entry.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.system(size: 11)).lineLimit(2).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(Self.timeFormatter.string(from: entry.timestamp))
+                    .font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .padding(.horizontal, 6).padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .help(entry.isOutgoing ? "Sent from this Mac. Click to copy again." : "Received from the other computer. Click to copy.")
     }
 }

@@ -343,3 +343,12 @@
 "Updating restarts MacViewer and ends current connections." = "Updating restarts MacViewer and ends current connections.";
 "Share clipboard with the other computer" = "Share clipboard with the other computer";
 "Text copied on either computer can be pasted on the other. Applies to new sessions." = "Text copied on either computer can be pasted on the other. Applies to new sessions.";
+"Sent to the other computer" = "Sent to the other computer";
+"Copied from the other computer" = "Copied from the other computer";
+"Share clipboard" = "Share clipboard";
+"Nothing shared yet. Copy text on either computer." = "Nothing shared yet. Copy text on either computer.";
+"Recent" = "Recent";
+"Sent from this Mac. Click to copy again." = "Sent from this Mac. Click to copy again.";
+"Received from the other computer. Click to copy." = "Received from the other computer. Click to copy.";
+"Chat with %@" = "Chat with %@";
+"Show chat" = "Show chat";
