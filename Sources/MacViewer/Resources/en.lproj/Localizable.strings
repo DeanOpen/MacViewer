@@ -447,3 +447,11 @@
 "This Mac" = "This Mac";
 "Display name" = "Display name";
 "English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections." = "English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections.";
+"Rename…" = "Rename…";
+"Rename computer" = "Rename computer";
+"Name" = "Name";
+"Save" = "Save";
+"Shown only on this Mac for %@. Leave empty to show the ID." = "Shown only on this Mac for %@. Leave empty to show the ID.";
+"Choose a computer to reuse its connection details. Use the pencil to rename it." = "Choose a computer to reuse its connection details. Use the pencil to rename it.";
+"Rename this computer" = "Rename this computer";
+"Rename" = "Rename";

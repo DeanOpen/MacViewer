@@ -447,3 +447,11 @@
 "This Mac" = "Máy Mac này";
 "Display name" = "Tên hiển thị";
 "English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections." = "Chỉ dùng chữ tiếng Anh (không dấu), tối đa 20 ký tự. Máy bên kia sẽ thấy máy Mac này là “%@”. Áp dụng cho các lần kết nối mới.";
+"Rename…" = "Đổi tên…";
+"Rename computer" = "Đổi tên máy";
+"Name" = "Tên";
+"Save" = "Lưu";
+"Shown only on this Mac for %@. Leave empty to show the ID." = "Chỉ hiển thị trên máy Mac này cho máy %@. Để trống để hiện lại ID.";
+"Choose a computer to reuse its connection details. Use the pencil to rename it." = "Chọn một máy để dùng lại thông tin kết nối. Bấm biểu tượng bút chì để đổi tên.";
+"Rename this computer" = "Đổi tên máy này";
+"Rename" = "Đổi tên";
