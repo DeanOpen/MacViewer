@@ -45,6 +45,24 @@ struct MacRemoteInputEncoderTests {
         #expect(encoder.encode(.key(keyCode: 0xffff, characters: "x", pressed: true, modifiers: [])).isEmpty)
     }
 
+    @Test("Input-method text is typed as VK_PACKET down/up pairs, one per UTF-16 unit")
+    func inputMethodText() {
+        var encoder = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        // "ệ" is U+1EC7; Vietnamese precomposed letters are single BMP units.
+        #expect(encoder.encode(.text("aệ")) == [
+            Data([30, 124, 124, 124, 1, 0xe7, 0, 0, 0x61, 0x00, 0]),
+            Data([30, 124, 124, 124, 2, 0xe7, 0, 0, 0x61, 0x00, 0]),
+            Data([30, 124, 124, 124, 1, 0xe7, 0, 0, 0xc7, 0x1e, 0]),
+            Data([30, 124, 124, 124, 2, 0xe7, 0, 0, 0xc7, 0x1e, 0]),
+        ])
+        // Control characters and surrogate halves (emoji) have no VK_PACKET form here.
+        #expect(encoder.encode(.text("\n😀")).isEmpty)
+        // Text holds no key, so a following release has nothing to release.
+        #expect(encoder.encode(.releaseAll).isEmpty)
+        var legacy = MacRemoteInputEncoder(supportsBinaryKeyboard: false)
+        #expect(legacy.encode(.text("ệ")).isEmpty)
+    }
+
     @Test("Aggregate modifiers synthesize left keys and release the held ordinary key first")
     func aggregateModifiersAndReleaseOrder() {
         var encoder = MacRemoteInputEncoder(supportsBinaryKeyboard: true)

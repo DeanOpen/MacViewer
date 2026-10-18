@@ -32,12 +32,21 @@ final class RemoteScreenNSView: NSView {
     var scrollSensitivity = 1.0
     var inputEnabled = false {
         didSet {
-            if oldValue && !inputEnabled { onInput?(.releaseAll) }
+            if oldValue && !inputEnabled { discardComposition(); rawKeysDown.removeAll(); onInput?(.releaseAll) }
         }
     }
     var onInput: ((RemoteInput) -> Void)?
     var remoteCursor: RemoteCursorPresenter.Snapshot?
     private let cursorLayer = CALayer()
+    /// Shows the input method's uncommitted text (e.g. Telex "việ") locally;
+    /// the peer receives it only once the input method commits it.
+    private let compositionLayer = CATextLayer()
+    private var markedText = "" { didSet { updateCompositionLayer() } }
+    /// The key event currently being interpreted by the input method.
+    private var keyEventInFlight: NSEvent?
+    private var keyEventConsumed = false
+    /// Keys sent on the physical VK path, so their key-up is sent too.
+    private var rawKeysDown: Set<UInt16> = []
     private var pointerTrackingArea: NSTrackingArea?
 
     override var isFlipped: Bool { true }
@@ -48,6 +57,13 @@ final class RemoteScreenNSView: NSView {
         wantsLayer = true
         cursorLayer.contentsGravity = .resize
         layer?.addSublayer(cursorLayer)
+        compositionLayer.fontSize = 15
+        compositionLayer.foregroundColor = NSColor.white.cgColor
+        compositionLayer.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+        compositionLayer.cornerRadius = 4
+        compositionLayer.alignmentMode = .center
+        compositionLayer.isHidden = true
+        layer?.addSublayer(compositionLayer)
         setAccessibilityLabel("Remote computer screen")
         setAccessibilityRole(.image)
     }
@@ -100,7 +116,7 @@ final class RemoteScreenNSView: NSView {
     }
 
     override func resignFirstResponder() -> Bool {
-        if inputEnabled { onInput?(.releaseAll) }
+        if inputEnabled { discardComposition(); rawKeysDown.removeAll(); onInput?(.releaseAll) }
         return super.resignFirstResponder()
     }
 
@@ -126,12 +142,46 @@ final class RemoteScreenNSView: NSView {
 
     override func keyDown(with event: NSEvent) {
         guard inputEnabled else { return }
-        onInput?(.key(keyCode: event.keyCode, characters: event.characters, pressed: true, modifiers: modifiers(event)))
+        // Shortcuts keep the physical-key path. Other keys go through the input
+        // method first so Vietnamese (Telex/VNI) and other IMEs can compose text.
+        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+           let context = inputContext {
+            keyEventInFlight = event
+            keyEventConsumed = false
+            _ = context.handleEvent(event)
+            keyEventInFlight = nil
+            if keyEventConsumed { return }
+        }
+        sendRawKey(event, pressed: true)
     }
 
     override func keyUp(with event: NSEvent) {
-        guard inputEnabled else { return }
-        onInput?(.key(keyCode: event.keyCode, characters: event.characters, pressed: false, modifiers: modifiers(event)))
+        guard inputEnabled, rawKeysDown.contains(event.keyCode) else { return }
+        sendRawKey(event, pressed: false)
+    }
+
+    private func sendRawKey(_ event: NSEvent, pressed: Bool) {
+        if pressed { rawKeysDown.insert(event.keyCode) } else { rawKeysDown.remove(event.keyCode) }
+        onInput?(.key(keyCode: event.keyCode, characters: event.characters, pressed: pressed, modifiers: modifiers(event)))
+    }
+
+    private func discardComposition() {
+        guard !markedText.isEmpty else { return }
+        markedText = ""
+        inputContext?.discardMarkedText()
+    }
+
+    private func updateCompositionLayer() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        compositionLayer.string = markedText
+        compositionLayer.isHidden = markedText.isEmpty
+        if !markedText.isEmpty {
+            compositionLayer.contentsScale = window?.backingScaleFactor ?? 2
+            let width = min(bounds.width - 16, compositionLayer.preferredFrameSize().width + 16)
+            compositionLayer.frame = CGRect(x: bounds.midX - width / 2, y: bounds.maxY - 40, width: width, height: 22)
+        }
+        CATransaction.commit()
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -190,4 +240,59 @@ final class RemoteScreenNSView: NSView {
         if event.modifierFlags.contains(.capsLock) { result.insert(.capsLock) }
         return result
     }
+}
+
+extension RemoteScreenNSView: @preconcurrency NSTextInputClient {
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        markedText = ""
+        keyEventConsumed = true
+        // A key that produced its own ASCII character keeps the VK/scan path, so
+        // plain typing behaves exactly as before; anything else is sent as text.
+        if let event = keyEventInFlight, text == event.characters,
+           text.unicodeScalars.count == 1, text.unicodeScalars.allSatisfy({ (0x20...0x7e).contains($0.value) }) {
+            sendRawKey(event, pressed: true)
+        } else if !text.isEmpty {
+            onInput?(.text(text))
+        }
+    }
+
+    override func doCommand(by selector: Selector) {
+        // Return, Backspace, arrows, Tab, Escape…: forward the physical key.
+        keyEventConsumed = true
+        if let event = keyEventInFlight { sendRawKey(event, pressed: true) }
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        markedText = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        keyEventConsumed = true
+    }
+
+    func unmarkText() {
+        // The input method commits its composition as-is (e.g. focus change).
+        let text = markedText
+        markedText = ""
+        if !text.isEmpty { onInput?(.text(text)) }
+    }
+
+    func selectedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+
+    func markedRange() -> NSRange {
+        markedText.isEmpty ? NSRange(location: NSNotFound, length: 0)
+            : NSRange(location: 0, length: (markedText as NSString).length)
+    }
+
+    func hasMarkedText() -> Bool { !markedText.isEmpty }
+
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        // Place candidate windows at the composition preview.
+        guard let window else { return .zero }
+        return window.convertToScreen(convert(compositionLayer.frame, to: nil))
+    }
+
+    func characterIndex(for point: NSPoint) -> Int { NSNotFound }
 }

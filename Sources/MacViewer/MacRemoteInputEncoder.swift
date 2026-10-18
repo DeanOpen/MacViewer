@@ -83,6 +83,16 @@ struct MacRemoteInputEncoder {
             } else {
                 releaseKey(code, into: &output)
             }
+        case let .text(text):
+            guard supportsBinaryKeyboard else { return [] }
+            // VK_PACKET carries one UTF-16 unit per down/up pair, as the Windows
+            // desktop sends for IME text (the Mac host decodes the same form).
+            for unit in text.utf16 where unit >= 0x20 && !(0xd800...0xdfff).contains(unit) {
+                for kind in [KeyboardMessage.Kind.keyDown, .keyUp] {
+                    output.append(KeyboardMessage(kind: kind, virtualKey: Self.vkPacket, scanCode: 0,
+                        character: unit, capsLockOn: modifiers.contains(.capsLock)).encode())
+                }
+            }
         case let .modifiers(flags):
             modifiers = flags
             if supportsBinaryKeyboard { reconcileModifiers(into: &output) }
@@ -250,6 +260,8 @@ struct MacRemoteInputEncoder {
             }
         }
     }
+
+    private static let vkPacket: UInt8 = 0xe7
 
     private static func modifierGroup(for code: UInt16) -> ModifierGroup? {
         ModifierGroup.allCases.first { $0.left == code || $0.right == code }
