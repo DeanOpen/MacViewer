@@ -66,6 +66,8 @@ struct MacViewerSettings: View {
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
     @AppStorage(UpdateChecker.automaticKey) private var checkForUpdates = true
     @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = true
+    @AppStorage(MacRegistrationProfile.displayNameKey) private var displayName = ""
+    @AppStorage(ReceivedFilesFolder.key) private var receivedFolder = ""
 
     var body: some View {
         TabView {
@@ -85,6 +87,13 @@ struct MacViewerSettings: View {
                     }
                 }
                 Text("Language changes apply immediately.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("This Mac") {
+                TextField("Display name", text: $displayName, prompt: Text(MacRegistrationProfile.defaultDisplayName))
+                Text(LF("English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections.",
+                        MacRegistrationProfile.loginWireName(displayName).isEmpty
+                            ? MacRegistrationProfile.defaultDisplayName : MacRegistrationProfile.loginWireName(displayName)))
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("History") {
                 Toggle("Remember successfully connected partner IDs", isOn: $rememberPartners)

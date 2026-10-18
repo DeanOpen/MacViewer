@@ -24,7 +24,8 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
         let display = CGMainDisplayID()
         var configuration = UltraViewerRelaySession.Configuration(registration: profile,
             localScreenWidth: Int32(clamping: CGDisplayPixelsWide(display)),
-            localScreenHeight: Int32(clamping: CGDisplayPixelsHigh(display)), displayName: "MacViewer")
+            localScreenHeight: Int32(clamping: CGDisplayPixelsHigh(display)),
+            displayName: MacRegistrationProfile.loginDisplayName())
         // Explicit developer opt-in only. Screens stay in a private local folder.
         if UserDefaults.standard.bool(forKey: "MacViewer.captureProtocolFrames"),
            let support = FileManager.default.urls(for: .applicationSupportDirectory,

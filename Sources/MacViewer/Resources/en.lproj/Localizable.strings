@@ -444,3 +444,6 @@
 "Stop" = "Stop";
 "Disconnect AI agents and block their input for this session" = "Disconnect AI agents and block their input for this session";
 "Stopped all AI agents." = "Stopped all AI agents.";
+"This Mac" = "This Mac";
+"Display name" = "Display name";
+"English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections." = "English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections.";

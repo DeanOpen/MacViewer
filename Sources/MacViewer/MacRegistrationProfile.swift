@@ -65,7 +65,7 @@ enum MacRegistrationProfile {
         let directory = support.appendingPathComponent("MacViewer", isDirectory: true)
             .appendingPathComponent(forHosting ? "Host" : "Client", isDirectory: true)
         let process = ProcessInfo.processInfo
-        let environment = Environment(network: try discoverNetwork(), hostName: process.hostName,
+        let environment = Environment(network: try discoverNetwork(), hostName: customDisplayName() ?? process.hostName,
                                       userName: NSUserName(), operatingSystem: process.operatingSystemVersion)
         return try loadOrCreate(in: directory, environment: environment)
     }
@@ -130,6 +130,30 @@ enum MacRegistrationProfile {
         // Actual Mac product patch/major/minor map to .NET Build/Major/Minor.
         // Revision and its two halves have no Mac counterpart and remain zero.
         "\(version.patchVersion)|\(version.majorVersion)|0|\(version.minorVersion)|0|0"
+    }
+
+    /// User-chosen name for this Mac, shown to partners. Empty means the default.
+    static let displayNameKey = "MacViewer.displayName"
+    static let defaultDisplayName = "MacViewer"
+
+    static func customDisplayName(defaults: UserDefaults = .standard) -> String? {
+        let name = (defaults.string(forKey: displayNameKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : String(name.prefix(64))
+    }
+
+    /// The name sent in a partner login, which accepts only ASCII and keeps 20
+    /// characters after removing the native helper's reserved characters.
+    static func loginDisplayName(defaults: UserDefaults = .standard) -> String {
+        let name = loginWireName(customDisplayName(defaults: defaults) ?? "")
+        return name.isEmpty ? defaultDisplayName : name
+    }
+
+    static func loginWireName(_ name: String) -> String {
+        let reserved = Set("!#$&?:/\\*,.@<>;'\"=")
+        let folded = name.replacingOccurrences(of: "đ", with: "d").replacingOccurrences(of: "Đ", with: "D")
+            .folding(options: .diacriticInsensitive, locale: nil)
+        let ascii = folded.filter { $0.isASCII && !reserved.contains($0) && $0.unicodeScalars.allSatisfy({ (32...126).contains($0.value) }) }
+        return String(ascii.trimmingCharacters(in: .whitespaces).prefix(20)).trimmingCharacters(in: .whitespaces)
     }
 
     static func userNameWireValue(_ name: String) -> String {

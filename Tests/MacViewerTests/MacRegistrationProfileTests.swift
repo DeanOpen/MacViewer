@@ -67,3 +67,21 @@ import UltraViewerProtocol
         try MacRegistrationProfile.selectNetwork(from: [tunnel], primaryInterface: "utun3")
     }
 }
+
+@Test func macDisplayNameFallsBackAndFitsTheLoginField() throws {
+    #expect(MacRegistrationProfile.loginWireName("Máy Kế Toán Đức") == "May Ke Toan Duc")
+    #expect(MacRegistrationProfile.loginWireName("Dean's Mac: #1 @home") == "Deans Mac 1 home")
+    #expect(MacRegistrationProfile.loginWireName("A very long display name here") == "A very long display")
+    #expect(MacRegistrationProfile.loginWireName("家") == "")
+    let suite = "MacViewer-display-name-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    #expect(MacRegistrationProfile.customDisplayName(defaults: defaults) == nil)
+    #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "MacViewer")
+    defaults.set("  家  ", forKey: MacRegistrationProfile.displayNameKey)
+    // Registration keeps Unicode (sent as UTF-8 Base64); login falls back to the default.
+    #expect(MacRegistrationProfile.customDisplayName(defaults: defaults) == "家")
+    #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "MacViewer")
+    defaults.set("Mac Văn Phòng", forKey: MacRegistrationProfile.displayNameKey)
+    #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "Mac Van Phong")
+}

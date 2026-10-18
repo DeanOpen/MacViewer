@@ -444,3 +444,6 @@
 "Stop" = "Dừng";
 "Disconnect AI agents and block their input for this session" = "Ngắt kết nối trợ lý AI và chặn thao tác của chúng trong phiên này";
 "Stopped all AI agents." = "Đã dừng mọi trợ lý AI.";
+"This Mac" = "Máy Mac này";
+"Display name" = "Tên hiển thị";
+"English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections." = "Chỉ dùng chữ tiếng Anh (không dấu), tối đa 20 ký tự. Máy bên kia sẽ thấy máy Mac này là “%@”. Áp dụng cho các lần kết nối mới.";
