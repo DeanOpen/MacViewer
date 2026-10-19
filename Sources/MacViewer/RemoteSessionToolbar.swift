@@ -60,7 +60,10 @@ struct RemoteSessionToolbar: View {
     @Binding var imageQuality: RemoteImageQuality
     @ObservedObject var tools: SessionToolsModel
     @ObservedObject var capture: RemoteCaptureController
-    let image: CGImage?
+    /// Read only when a capture starts. Passing the frame itself would rebuild
+    /// the toolbar for every remote frame and close any open menu.
+    let hasImage: Bool
+    let currentImage: () -> CGImage?
     let callbacks: RemoteSessionToolbarCallbacks
     @State private var confirmRestart = false
     @State private var showCustomQuality = false
@@ -85,13 +88,15 @@ struct RemoteSessionToolbar: View {
             SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput,
                                toggleSidebar: callbacks.toggleChat)
             Divider().frame(height: 23)
-            Toggle(isOn: $forwardShortcuts) { Image(systemName: "command") }
-                .toggleStyle(.button)
+            Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
+                .disabled(!isConnected || !allowsControl).fixedSize()
+            Toggle(isOn: $forwardShortcuts) { Label("Send ⌘ shortcuts", systemImage: "command") }
+                .toggleStyle(.button).fixedSize()
+                .disabled(!controlEnabled)
                 .help(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts go to the other computer. Click to keep them on this Mac."
                                        : "⌘ shortcuts stay on this Mac. Click to send them to the other computer."))
                 .accessibilityLabel("Send keyboard shortcuts to the other computer")
-            Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
-                .disabled(!isConnected || !allowsControl).fixedSize()
+            Divider().frame(height: 23)
             // Filled red so it reads as a button among the borderless toolbar items.
             Button(role: .destructive, action: callbacks.disconnect) {
                 Label("Disconnect", systemImage: "xmark.circle.fill")
@@ -132,128 +137,135 @@ struct RemoteSessionToolbar: View {
     }
 
     private var actionsMenu: some View {
-        Menu {
+        AppKitMenuButton { menu in
+            let canAct = allowsControl && controlEnabled
             if let action = callbacks.secureAttention {
-                Button("Send Ctrl-Alt-Delete") { callbacks.releaseInput(); action() }
-                    .disabled(!allowsControl || !controlEnabled)
+                menu.button("Send Ctrl-Alt-Delete", enabled: canAct) { callbacks.releaseInput(); action() }
             }
             if let action = callbacks.lockScreen {
-                Button("Lock remote screen") { callbacks.releaseInput(); action() }
-                    .disabled(!allowsControl || !controlEnabled)
+                menu.button("Lock remote screen", enabled: canAct) { callbacks.releaseInput(); action() }
             }
             if callbacks.restart != nil {
-                Button("Restart remote computer…") { callbacks.releaseInput(); confirmRestart = true }
-                    .disabled(!allowsControl || !controlEnabled)
+                menu.button("Restart remote computer…", enabled: canAct) { callbacks.releaseInput(); confirmRestart = true }
             }
             if let switchSides = callbacks.switchSides {
-                Button("Switch control sides…") { callbacks.releaseInput(); switchSides() }
+                menu.button("Switch control sides…") { callbacks.releaseInput(); switchSides() }
             }
-            if callbacks.secureAttention != nil || callbacks.lockScreen != nil || callbacks.restart != nil { Divider() }
-            Button("Release pressed keys and buttons", action: callbacks.releaseInput)
-                .disabled(!controlEnabled)
+            menu.separator()
+            menu.button("Release pressed keys and buttons", enabled: controlEnabled, action: callbacks.releaseInput)
         } label: {
             Label("Actions", systemImage: "bolt.circle.fill")
         }
-        .menuStyle(.borderlessButton).fixedSize().disabled(!isConnected)
+        .fixedSize().disabled(!isConnected)
     }
 
     private var configurationMenu: some View {
-        Menu {
+        AppKitMenuButton { menu in
             if let selectMonitor = callbacks.selectMonitor, !callbacks.monitors.isEmpty {
-                Picker("Monitor", selection: Binding(get: { callbacks.selectedMonitor }, set: { selectMonitor($0) })) {
-                    Text("All monitors").tag(0)
-                    ForEach(callbacks.monitors) { monitor in
-                        Text(LF("Monitor %ld · %ld × %ld", monitor.index, monitor.width, monitor.height)).tag(monitor.index)
-                    }
-                }
-                Divider()
+                menu.picker("Monitor",
+                            options: [(L("All monitors"), 0)] + callbacks.monitors.map {
+                                (LF("Monitor %ld · %ld × %ld", $0.index, $0.width, $0.height), $0.index)
+                            },
+                            selection: callbacks.selectedMonitor, select: selectMonitor)
+                menu.separator()
             }
-            Picker("Display size", selection: $displayScale) {
-                ForEach(RemoteDisplayScale.allCases) { mode in Text(LocalizedStringKey(mode.title)).tag(mode) }
-            }
-            Toggle("Smooth scaling", isOn: $smoothScaling)
-            Divider()
-            Toggle("Send keyboard shortcuts to the other computer", isOn: $forwardShortcuts)
-            Toggle("View only", isOn: Binding(get: { !controlEnabled }, set: { controlEnabled = !$0 }))
-                .disabled(!allowsControl)
+            menu.picker("Display size", options: RemoteDisplayScale.allCases.map { (L($0.title), $0) },
+                        selection: displayScale) { displayScale = $0 }
+            menu.toggle("Smooth scaling", isOn: smoothScaling) { smoothScaling = $0 }
+            menu.separator()
+            menu.toggle("Send keyboard shortcuts to the other computer", isOn: forwardShortcuts) { forwardShortcuts = $0 }
+            menu.toggle("View only", isOn: !controlEnabled, enabled: allowsControl) { controlEnabled = !$0 }
             if let setWallpaper = callbacks.setWallpaper {
-                Toggle("Show remote wallpaper", isOn: Binding(get: { callbacks.wallpaperVisible }, set: { setWallpaper($0) }))
-                    .disabled(!allowsControl || !controlEnabled)
+                menu.toggle("Show remote wallpaper", isOn: callbacks.wallpaperVisible,
+                            enabled: allowsControl && controlEnabled, action: setWallpaper)
             }
             if let setCursor = callbacks.setShowRemoteCursor {
-                Toggle("Show remote cursor", isOn: Binding(get: { callbacks.showRemoteCursor }, set: { setCursor($0) }))
+                menu.toggle("Show remote cursor", isOn: callbacks.showRemoteCursor, action: setCursor)
             }
             if let setAudio = callbacks.setComputerAudioEnabled {
-                Toggle("Computer audio", isOn: Binding(get: { callbacks.computerAudioEnabled }, set: { setAudio($0) }))
-                    .disabled(callbacks.isChangingAudio || !isConnected)
-                Picker("Audio volume", selection: $audioVolume) {
-                    Text("Mute").tag(0.0)
-                    ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { Text($0, format: .percent).tag($0) }
-                }
-                .disabled(!callbacks.computerAudioEnabled)
+                menu.toggle("Computer audio", isOn: callbacks.computerAudioEnabled,
+                            enabled: !callbacks.isChangingAudio && isConnected, action: setAudio)
+                menu.picker("Audio volume",
+                            options: [(L("Mute"), 0.0)] + [0.25, 0.5, 0.75, 1.0].map { ("\(Int($0 * 100))%", $0) },
+                            selection: audioVolume, enabled: callbacks.computerAudioEnabled) { audioVolume = $0 }
             }
             if let setQuality = callbacks.setImageQuality {
-                Divider()
-                Picker("Image quality", selection: $imageQuality) {
-                    ForEach(RemoteImageQuality.allCases) { quality in Text(LocalizedStringKey(quality.title)).tag(quality) }
-                }
-                .onChange(of: imageQuality) { quality in
+                menu.separator()
+                menu.picker("Image quality", options: RemoteImageQuality.allCases.map { (L($0.title), $0) },
+                            selection: imageQuality) { quality in
+                    imageQuality = quality
                     if quality == .custom { callbacks.releaseInput(); showCustomQuality = true }
                     else { setQuality(quality) }
                 }
                 if imageQuality == .custom {
-                    Button("Adjust custom quality…") { callbacks.releaseInput(); showCustomQuality = true }
+                    menu.button("Adjust custom quality…") { callbacks.releaseInput(); showCustomQuality = true }
                 }
             }
         } label: {
             Label("Configuration", systemImage: "gearshape")
         }
-        .menuStyle(.borderlessButton).fixedSize()
+        .fixedSize()
         .onChange(of: displayScale) { _ in callbacks.releaseInput() }
     }
 
     private var captureMenu: some View {
-        Menu {
-            Button("Capture and annotate…") {
-                guard let image else { return }
+        AppKitMenuButton { menu in
+            let canCapture = isConnected && hasImage
+            menu.button("Capture and annotate…", enabled: canCapture) {
+                guard let image = currentImage() else { return }
                 callbacks.releaseInput()
                 capture.annotateScreenshot(image, peerName: peerName)
             }
-            .disabled(!isConnected || image == nil)
-            Button("Capture a region…") {
-                guard let image else { return }
+            menu.button("Capture a region…", enabled: canCapture) {
+                guard let image = currentImage() else { return }
                 callbacks.releaseInput()
                 capture.saveRegion(image, peerName: peerName)
             }
-            .disabled(!isConnected || image == nil)
-            Button("Save full screen as PNG…") {
-                guard let image else { return }
+            menu.button("Save full screen as PNG…", enabled: canCapture && !capture.isSaving) {
+                guard let image = currentImage() else { return }
                 callbacks.releaseInput()
                 capture.saveScreenshot(image, peerName: peerName)
             }
-            .disabled(!isConnected || image == nil || capture.isSaving)
-            Divider()
-            Button("Open capture folder", action: capture.openCaptureFolder)
-            Divider()
+            menu.separator()
+            menu.button("Open capture folder", action: capture.openCaptureFolder)
+            menu.separator()
             if capture.isRecording {
-                Button(LF("Stop recording (%@)", "\(capture.recordingSeconds / 60):\(String(format: "%02d", capture.recordingSeconds % 60))")) {
+                menu.button(LF("Stop recording (%@)", "\(capture.recordingSeconds / 60):\(String(format: "%02d", capture.recordingSeconds % 60))")) {
                     Task { await capture.stopRecording() }
                 }
             } else if capture.isFinishingRecording {
-                Text("Finishing recording…")
+                menu.label(L("Finishing recording…"))
             } else {
-                Button("Record remote screen…") {
-                    guard let image else { return }
+                menu.button("Record remote screen…",
+                            enabled: canCapture && !capture.isPreparingRecording && !capture.isSaving) {
+                    guard let image = currentImage() else { return }
                     callbacks.releaseInput()
                     capture.startRecording(image, peerName: peerName)
                 }
-                .disabled(!isConnected || image == nil || capture.isPreparingRecording || capture.isSaving)
             }
         } label: {
             Label(LocalizedStringKey(capture.isRecording ? "Recording" : "Capture"),
                   systemImage: capture.isRecording ? "record.circle.fill" : "camera")
         }
-        .menuStyle(.borderlessButton).fixedSize()
+        .fixedSize()
+    }
+}
+
+/// Skips re-rendering (which closes open menus) while the remote screen
+/// updates. Closures are not compared; they read live state when called.
+extension RemoteSessionToolbar: @preconcurrency Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.peerName == rhs.peerName && lhs.isConnected == rhs.isConnected
+            && lhs.allowsControl == rhs.allowsControl && lhs.controlEnabled == rhs.controlEnabled
+            && lhs.displayScale == rhs.displayScale && lhs.smoothScaling == rhs.smoothScaling
+            && lhs.forwardShortcuts == rhs.forwardShortcuts && lhs.imageQuality == rhs.imageQuality
+            && lhs.tools === rhs.tools && lhs.capture === rhs.capture && lhs.hasImage == rhs.hasImage
+            && lhs.callbacks.monitors == rhs.callbacks.monitors
+            && lhs.callbacks.selectedMonitor == rhs.callbacks.selectedMonitor
+            && lhs.callbacks.wallpaperVisible == rhs.callbacks.wallpaperVisible
+            && lhs.callbacks.computerAudioEnabled == rhs.callbacks.computerAudioEnabled
+            && lhs.callbacks.isChangingAudio == rhs.callbacks.isChangingAudio
+            && lhs.callbacks.showRemoteCursor == rhs.callbacks.showRemoteCursor
     }
 }
 

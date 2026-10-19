@@ -40,12 +40,14 @@ struct SessionToolsButton: View {
     }
 }
 
-/// Compact transcript and composer inside the native floating chat window.
+/// Transcript of message bubbles and file cards, with a composer. Files can be
+/// attached with the paperclip or dropped anywhere on the chat.
 @MainActor
 struct SessionToolsView: View {
     @ObservedObject var tools: SessionToolsModel
     let peerName: String
     @FocusState private var draftFocused: Bool
+    @State private var isDropTargeted = false
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -61,42 +63,22 @@ struct SessionToolsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Chat history").font(.system(size: 10)).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 9).padding(.vertical, 5)
             if tools.showsClipboardHint { clipboardHint }
             transcript
-            if tools.peerIsTyping {
-                Text(LF("%@ is typing…", peerName)).font(.system(size: 10)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 9).padding(.vertical, 3)
-            }
             if let error = tools.errorMessage {
-                Text(L(error)).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
+                Label(L(error), systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11)).foregroundStyle(.red).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
             }
             Divider()
-            HStack(alignment: .bottom, spacing: 6) {
-                Button(action: chooseFiles) { Image(systemName: "paperclip") }
-                    .buttonStyle(.borderless).disabled(!tools.canTransferFiles)
-                    .help("Send a file")
-                draftField
-                    .font(.system(size: 12)).textFieldStyle(.roundedBorder)
-                    .focused($draftFocused).disabled(!tools.isActive)
-                    .onSubmit { if canSend { tools.sendDraft() } }
-                    .onChange(of: tools.draft) { _ in tools.draftChanged() }
-                Button("Send", action: tools.sendDraft)
-                    .buttonStyle(.bordered).controlSize(.small).disabled(!canSend)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("Send message (Command-Return)")
-            }
-            .padding(8)
+            composer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay { if isDropTargeted { dropOverlay } }
         .onAppear { draftFocused = tools.isActive }
         // Drop files anywhere on the chat to send them.
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             guard tools.canTransferFiles, !providers.isEmpty else { return false }
             let tools = tools
             for provider in providers {
@@ -107,6 +89,59 @@ struct SessionToolsView: View {
             }
             return true
         }
+    }
+
+    // MARK: Composer
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            Button(action: chooseFiles) {
+                Image(systemName: "paperclip").font(.system(size: 14)).frame(width: 24, height: 24)
+            }
+            .buttonStyle(.borderless).disabled(!tools.canTransferFiles)
+            .help("Send a file (or drag it here)")
+            draftField
+                .font(.system(size: 12)).textFieldStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.quaternary))
+                .focused($draftFocused).disabled(!tools.isActive)
+                .onSubmit { if canSend { tools.sendDraft() } }
+                .onChange(of: tools.draft) { _ in tools.draftChanged() }
+            Button { tools.sendDraft() } label: {
+                Image(systemName: "arrow.up.circle.fill").font(.system(size: 22))
+                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.5))
+            }
+            .buttonStyle(.borderless).disabled(!canSend)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("Send message (Command-Return)").accessibilityLabel("Send")
+        }
+        .padding(8)
+    }
+
+    @ViewBuilder private var draftField: some View {
+        if #available(macOS 13, *) {
+            TextField("Message", text: $tools.draft, axis: .vertical).lineLimit(1...4)
+        } else {
+            TextField("Message", text: $tools.draft)
+        }
+    }
+
+    private var dropOverlay: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                VStack(spacing: 6) {
+                    Image(systemName: tools.canTransferFiles ? "arrow.down.doc.fill" : "nosign").font(.system(size: 26))
+                    Text(tools.canTransferFiles ? LF("Drop to send to %@", peerName) : L("Files can't be sent right now."))
+                        .font(.system(size: 12, weight: .medium)).multilineTextAlignment(.center)
+                }
+                .foregroundStyle(tools.canTransferFiles ? Color.accentColor : Color.secondary)
+                .padding()
+            }
+            .padding(6)
+            .allowsHitTesting(false)
     }
 
     private var clipboardHint: some View {
@@ -126,14 +161,6 @@ struct SessionToolsView: View {
         .background(.quaternary.opacity(0.5))
     }
 
-    @ViewBuilder private var draftField: some View {
-        if #available(macOS 13, *) {
-            TextField("Message", text: $tools.draft, axis: .vertical).lineLimit(1...3)
-        } else {
-            TextField("Message", text: $tools.draft)
-        }
-    }
-
     private func chooseFiles() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -144,66 +171,171 @@ struct SessionToolsView: View {
         tools.sendFiles(panel.urls)
     }
 
+    // MARK: Transcript
+
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 5) {
-                    ForEach(tools.messages) { message in
-                        Group {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    if tools.messages.isEmpty { emptyState }
+                    ForEach(Array(tools.messages.enumerated()), id: \.element.id) { index, message in
+                        let previous = index > 0 ? tools.messages[index - 1] : nil
+                        let startsGroup = previous == nil || previous?.isOutgoing != message.isOutgoing
+                            || message.timestamp.timeIntervalSince(previous!.timestamp) > 300
+                        VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 3) {
+                            if startsGroup { header(message) }
                             if let id = message.transferID, let transfer = tools.transfers[id] {
-                                fileRow(message, transfer)
+                                fileCard(transfer)
                             } else {
-                                messageRow(message)
+                                bubble(message)
                             }
-                        }.id(message.id)
+                        }
+                        .frame(maxWidth: .infinity, alignment: message.isOutgoing ? .trailing : .leading)
+                        .padding(.top, startsGroup && previous != nil ? 6 : 0)
+                        .id(message.id)
                     }
+                    if tools.peerIsTyping { typingIndicator.id("typing") }
                 }
-                .padding(9).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
             }
             .background(Color(nsColor: .textBackgroundColor))
             .onAppear {
                 if let id = tools.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
             }
             .onChange(of: tools.messages.last?.id) { id in
-                if let id { proxy.scrollTo(id, anchor: .bottom) }
+                if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) } }
+            }
+            .onChange(of: tools.peerIsTyping) { typing in
+                if typing { proxy.scrollTo("typing", anchor: .bottom) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func fileRow(_ message: SessionChatMessage, _ transfer: SessionFileTransfer) -> some View {
-        let sender = message.isOutgoing ? L("You") : peerName
-        let time = Self.timeFormatter.string(from: message.timestamp)
-        let size = ByteCountFormatter.string(fromByteCount: transfer.size, countStyle: .file)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("\(sender) (\(time)):").font(.system(size: 12)).bold()
-            HStack(alignment: .top, spacing: 8) {
-                Image(nsImage: NSWorkspace.shared.icon(for: .init(filenameExtension: (transfer.name as NSString).pathExtension) ?? .data))
-                    .resizable().frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(transfer.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                    Text(fileStatus(transfer, size: size)).font(.system(size: 10)).foregroundStyle(.secondary)
-                    if transfer.state == .transferring {
-                        ProgressView(value: transfer.fraction).controlSize(.small)
-                    }
-                    HStack(spacing: 6) {
-                        if transfer.state == .offered {
-                            Button("Save") { tools.saveFile(transfer.id) }.buttonStyle(.borderedProminent)
-                        }
-                        if !transfer.isFinished {
-                            Button("Cancel") { tools.cancelFile(transfer.id) }.buttonStyle(.bordered)
-                        }
-                        if !transfer.isOutgoing, transfer.state == .completed {
-                            Button("Show in Finder") { tools.revealFile(transfer.id) }.buttonStyle(.bordered)
-                        }
-                    }
-                    .controlSize(.small)
-                }
-            }
-            .padding(7)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 28)).foregroundStyle(.tertiary)
+            Text(LF("Chat with %@", peerName)).font(.system(size: 12, weight: .semibold))
+            Text("Messages and files appear here. Drag files onto the chat to send them.")
+                .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity).padding(.vertical, 40).padding(.horizontal, 12)
+    }
+
+    private func header(_ message: SessionChatMessage) -> some View {
+        HStack(spacing: 4) {
+            Text(message.isOutgoing ? L("You") : peerName).fontWeight(.semibold)
+            Text(Self.timeFormatter.string(from: message.timestamp)).monospacedDigit()
+        }
+        .font(.system(size: 10)).foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
+    }
+
+    private func bubble(_ message: SessionChatMessage) -> some View {
+        Text(message.text)
+            .font(.system(size: 12)).textSelection(.enabled)
+            .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(message.isOutgoing ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                if !message.isOutgoing { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(message.isOutgoing ? .leading : .trailing, 30)
+            .accessibilityLabel("\(message.isOutgoing ? L("You") : peerName): \(message.text)")
+    }
+
+    private var typingIndicator: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "ellipsis").font(.system(size: 12, weight: .bold))
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            Text(LF("%@ is typing…", peerName)).font(.system(size: 10))
+        }
+        .foregroundStyle(.secondary).padding(.top, 4)
+    }
+
+    // MARK: Files
+
+    private func fileCard(_ transfer: SessionFileTransfer) -> some View {
+        let size = ByteCountFormatter.string(fromByteCount: transfer.size, countStyle: .file)
+        let fileExtension = (transfer.name as NSString).pathExtension
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 9) {
+                Image(nsImage: NSWorkspace.shared.icon(for: .init(filenameExtension: fileExtension) ?? .data))
+                    .resizable().frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(transfer.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                    HStack(spacing: 4) {
+                        statusIcon(transfer)
+                        Text(fileStatus(transfer, size: size)).lineLimit(2)
+                    }
+                    .font(.system(size: 10)).foregroundStyle(statusColor(transfer))
+                }
+                Spacer(minLength: 0)
+            }
+            if transfer.state == .transferring || transfer.state == .waiting {
+                ProgressView(value: transfer.state == .waiting ? nil : transfer.fraction)
+                    .progressViewStyle(.linear).controlSize(.small)
+            }
+            let actions = fileActions(transfer)
+            if !actions.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(actions, id: \.title) { action in
+                        Button(LocalizedStringKey(action.title), action: action.run)
+                            .buttonStyle(action.prominent ? AnyPrimitiveButtonStyle(.borderedProminent) : AnyPrimitiveButtonStyle(.bordered))
+                    }
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(9)
+        .frame(width: 230, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .onTapGesture(count: 2) {
+            if !transfer.isOutgoing, transfer.state == .completed { tools.revealFile(transfer.id) }
+        }
+    }
+
+    private struct FileAction {
+        let title: String
+        var prominent = false
+        let run: () -> Void
+    }
+
+    private func fileActions(_ transfer: SessionFileTransfer) -> [FileAction] {
+        var actions: [FileAction] = []
+        if transfer.state == .offered {
+            actions.append(FileAction(title: "Save", prominent: true) { tools.saveFile(transfer.id) })
+        }
+        if !transfer.isFinished {
+            actions.append(FileAction(title: "Cancel") { tools.cancelFile(transfer.id) })
+        }
+        if !transfer.isOutgoing, transfer.state == .completed {
+            actions.append(FileAction(title: "Show in Finder") { tools.revealFile(transfer.id) })
+        }
+        return actions
+    }
+
+    @ViewBuilder private func statusIcon(_ transfer: SessionFileTransfer) -> some View {
+        switch transfer.state {
+        case .completed: Image(systemName: "checkmark.circle.fill")
+        case .canceled: Image(systemName: "xmark.circle")
+        case .failed: Image(systemName: "exclamationmark.triangle.fill")
+        case .offered: Image(systemName: "arrow.down.circle")
+        case .waiting, .transferring: Image(systemName: transfer.isOutgoing ? "arrow.up.circle" : "arrow.down.circle")
+        }
+    }
+
+    private func statusColor(_ transfer: SessionFileTransfer) -> Color {
+        switch transfer.state {
+        case .completed: .green
+        case .failed: .red
+        default: .secondary
+        }
     }
 
     private func fileStatus(_ transfer: SessionFileTransfer, size: String) -> String {
@@ -211,22 +343,21 @@ struct SessionToolsView: View {
         case .offered: return size
         case .waiting: return LF("%@ · Waiting for the other computer…", size)
         case .transferring:
+            let percent = Int((transfer.fraction * 100).rounded())
             return LF("%@ of %@", ByteCountFormatter.string(fromByteCount: transfer.bytes, countStyle: .file), size)
+                + " · \(percent)%"
         case .completed: return LF(transfer.isOutgoing ? "%@ · Sent" : "%@ · Saved", size)
         case .canceled: return LF("%@ · Canceled", size)
         case let .failed(reason): return "\(size) · \(L(reason))"
         }
     }
+}
 
-    private func messageRow(_ message: SessionChatMessage) -> some View {
-        let sender = message.isOutgoing ? L("You") : peerName
-        let time = Self.timeFormatter.string(from: message.timestamp)
-        return (Text("\(sender) (\(time)): ").bold() + Text(message.text))
-            .font(.system(size: 12)).textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .combine)
-    }
+/// Lets one button pick bordered or bordered-prominent at runtime.
+private struct AnyPrimitiveButtonStyle: PrimitiveButtonStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: PrimitiveButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
 
 /// Toolbar indicator for the shared clipboard: green while sharing is on,

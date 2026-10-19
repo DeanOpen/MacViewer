@@ -599,7 +599,8 @@ struct ConnectionView: View {
                 displayScale: $remoteDisplayScale, smoothScaling: $smoothScreen,
                 forwardShortcuts: Binding(get: { forwardShortcuts }, set: { model.releaseRemoteInput(); forwardShortcuts = $0 }),
                 imageQuality: $remoteImageQuality,
-                tools: model.tools, capture: remoteCapture, image: model.displayedFrame?.image,
+                tools: model.tools, capture: remoteCapture, hasImage: model.displayedFrame != nil,
+                currentImage: { model.displayedFrame?.image },
                 callbacks: .init(home: { model.releaseRemoteInput(); showSession = false },
                                  disconnect: model.disconnect, releaseInput: model.releaseRemoteInput,
                                  secureAttention: { model.performRemoteAction(.controlAltDelete) },
@@ -619,6 +620,7 @@ struct ConnectionView: View {
                                  setComputerAudioEnabled: model.setComputerAudioEnabled,
                                  showRemoteCursor: model.showRemoteCursor,
                                  setShowRemoteCursor: model.setShowRemoteCursor))
+            .equatable()
             Divider()
             }
             if let error = model.errorMessage { errorLabel(error).padding(16) }

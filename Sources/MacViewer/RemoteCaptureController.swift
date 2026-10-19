@@ -151,7 +151,7 @@ final class RemoteCaptureController: ObservableObject {
     func recordFrame(_ image: CGImage) {
         guard isRecording, let recorder, pendingFrame == nil else { return }
         let elapsed = ProcessInfo.processInfo.systemUptime - recordingStarted
-        recordingSeconds = Int(elapsed)
+        if recordingSeconds != Int(elapsed) { recordingSeconds = Int(elapsed) }
         guard elapsed - lastSubmitted >= 1.0 / 15.0 else { return }
         lastSubmitted = elapsed
         let request = recordingRequest

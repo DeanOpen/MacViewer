@@ -498,3 +498,8 @@
 "Clipboard off" = "Bảng nhớ tạm: tắt";
 "Turn On" = "Bật";
 "Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Đang tắt chia sẻ bảng nhớ tạm. Chữ copy ở máy này sẽ không dán được ở máy kia.";
+"Send ⌘ shortcuts" = "Gửi phím tắt ⌘";
+"Drop to send to %@" = "Thả để gửi cho %@";
+"Files can't be sent right now." = "Hiện chưa thể gửi tệp.";
+"Messages and files appear here. Drag files onto the chat to send them." = "Tin nhắn và tệp sẽ hiện ở đây. Kéo tệp vào khung chat để gửi.";
+"Send a file (or drag it here)" = "Gửi tệp (hoặc kéo tệp vào đây)";

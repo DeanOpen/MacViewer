@@ -498,3 +498,8 @@
 "Clipboard off" = "Clipboard off";
 "Turn On" = "Turn On";
 "Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Clipboard sharing is off. Text copied on one computer can't be pasted on the other.";
+"Send ⌘ shortcuts" = "Send ⌘ shortcuts";
+"Drop to send to %@" = "Drop to send to %@";
+"Files can't be sent right now." = "Files can't be sent right now.";
+"Messages and files appear here. Drag files onto the chat to send them." = "Messages and files appear here. Drag files onto the chat to send them.";
+"Send a file (or drag it here)" = "Send a file (or drag it here)";
