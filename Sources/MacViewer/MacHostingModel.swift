@@ -385,6 +385,27 @@ final class MacHostingModel: ObservableObject {
         }
     }
 
+    /// Asks UltraViewer for a new ID and password for this Mac, for sharing
+    /// and for connecting to other computers. The old ID stops working.
+    func resetIdentity() {
+        guard canResetPassword else { return }
+        let wasRunning = isRunning
+        if wasRunning { stop() }
+        do {
+            _ = try MacRegistrationProfile.loadOrCreate(forHosting: true, regenerateIdentity: true)
+            _ = try MacRegistrationProfile.loadOrCreate(regenerateIdentity: true)
+        } catch {
+            errorMessage = "A new ID could not be created: \(error.localizedDescription)"; return
+        }
+        if wasRunning {
+            let previous = stopping
+            Task { [weak self] in
+                await previous?.value
+                self?.start()
+            }
+        }
+    }
+
     /// Stops sharing and waits until a connected viewer has been told.
     func shutdown() async {
         stop()

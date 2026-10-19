@@ -57,7 +57,8 @@ enum MacRegistrationProfile {
     private static let storageLock = NSLock()
     private static let maximumProfileBytes = 65_536
 
-    static func loadOrCreate(forHosting: Bool = false, regeneratePassword: Bool = false) throws -> ClientRegistration.Request {
+    static func loadOrCreate(forHosting: Bool = false, regeneratePassword: Bool = false,
+                             regenerateIdentity: Bool = false) throws -> ClientRegistration.Request {
         guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
                                                      in: .userDomainMask).first else {
             throw ProfileError.invalidStorageLocation
@@ -67,12 +68,15 @@ enum MacRegistrationProfile {
         let process = ProcessInfo.processInfo
         let environment = Environment(network: try discoverNetwork(), hostName: customDisplayName() ?? process.hostName,
                                       userName: NSUserName(), operatingSystem: process.operatingSystemVersion)
-        return try loadOrCreate(in: directory, environment: environment, regeneratePassword: regeneratePassword)
+        return try loadOrCreate(in: directory, environment: environment, regeneratePassword: regeneratePassword,
+                                regenerateIdentity: regenerateIdentity)
     }
 
     /// Injected location/platform values keep tests away from the user's profile.
+    /// A new device identity makes UltraViewer assign a new ID, with a new password.
     static func loadOrCreate(in directory: URL, environment: Environment,
-                             regeneratePassword: Bool = false) throws -> ClientRegistration.Request {
+                             regeneratePassword: Bool = false,
+                             regenerateIdentity: Bool = false) throws -> ClientRegistration.Request {
         storageLock.lock()
         defer { storageLock.unlock() }
         let manager = FileManager.default
@@ -84,7 +88,7 @@ enum MacRegistrationProfile {
         try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let destination = directory.appendingPathComponent("registration.json", isDirectory: false)
         let credentials: Credentials
-        if manager.fileExists(atPath: destination.path) {
+        if !regenerateIdentity, manager.fileExists(atPath: destination.path) {
             let attributes = try manager.attributesOfItem(atPath: destination.path)
             guard attributes[.type] as? FileAttributeType == .typeRegular else {
                 throw ProfileError.invalidStorageLocation

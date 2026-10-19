@@ -506,3 +506,9 @@
 "Too many wrong passwords. New connections are refused for 5 minutes." = "Too many wrong passwords. New connections are refused for 5 minutes.";
 "Program: %@" = "Program: %@";
 "Unknown" = "Unknown";
+"Get a new ID" = "Get a new ID";
+"End the current connection to change the ID" = "End the current connection to change the ID";
+"Get a new ID?" = "Get a new ID?";
+"New ID" = "New ID";
+"UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one." = "UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one.";
+"A new ID could not be created: %@" = "A new ID could not be created: %@";

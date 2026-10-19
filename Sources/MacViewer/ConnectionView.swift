@@ -20,6 +20,7 @@ struct ConnectionView: View {
     @State private var remoteWallpaperVisible = true
     @State private var revealPassword = false
     @State private var confirmPasswordReset = false
+    @State private var confirmIDReset = false
     @State private var renamingPartner: String?
     @State private var partnerNameDraft = ""
     @FocusState private var focusedField: Field?
@@ -293,12 +294,21 @@ struct ConnectionView: View {
                             Spacer(minLength: 0)
                             Button { copy(id) } label: { Image(systemName: "doc.on.doc") }
                                 .buttonStyle(.borderless).help("Copy your ID")
+                            Button { confirmIDReset = true } label: { Image(systemName: "arrow.clockwise") }
+                                .buttonStyle(.borderless).disabled(!hosting.canResetPassword)
+                                .help(hosting.canResetPassword ? "Get a new ID" : "End the current connection to change the ID")
                         } else {
                             if hosting.phase == .registering { ProgressView().controlSize(.small) }
                             Text(LocalizedStringKey(hosting.phase == .registering ? "Getting your ID…" : "Available after starting sharing"))
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                    .confirmationDialog("Get a new ID?", isPresented: $confirmIDReset, titleVisibility: .visible) {
+                        Button("New ID") { hosting.resetIdentity() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one.")
+                    }
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Your Mac’s password").font(.callout.weight(.medium))

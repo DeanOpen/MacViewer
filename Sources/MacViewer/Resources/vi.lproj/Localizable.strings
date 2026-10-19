@@ -506,3 +506,9 @@
 "Too many wrong passwords. New connections are refused for 5 minutes." = "Nhập sai mật khẩu quá nhiều lần. Tạm từ chối kết nối mới trong 5 phút.";
 "Program: %@" = "Chương trình: %@";
 "Unknown" = "Không rõ";
+"Get a new ID" = "Lấy ID mới";
+"End the current connection to change the ID" = "Kết thúc kết nối hiện tại để đổi ID";
+"Get a new ID?" = "Lấy ID mới?";
+"New ID" = "ID mới";
+"UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one." = "UltraViewer sẽ cấp cho máy Mac này ID và mật khẩu mới. ID cũ sẽ ngừng hoạt động, các kết nối đã lưu tới máy Mac này cần dùng ID mới.";
+"A new ID could not be created: %@" = "Không thể tạo ID mới: %@";

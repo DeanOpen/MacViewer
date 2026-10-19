@@ -106,3 +106,18 @@ import UltraViewerProtocol
     // The new password is what later launches load.
     #expect(try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment).password == changed.password)
 }
+
+@Test func macRegistrationProfileNewIdentityReplacesTheDeviceIdentity() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("MacViewer-profile-new-id-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let environment = MacRegistrationProfile.Environment(
+        network: .init(address: try RelayIPv4Address("192.0.2.5"), macAddress: "020000000001"),
+        hostName: "Mac", userName: "dean", operatingSystem: .init(majorVersion: 26, minorVersion: 0, patchVersion: 1))
+    let first = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment)
+    let renewed = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment, regenerateIdentity: true)
+    #expect(renewed.deviceIdentity != first.deviceIdentity)
+    #expect(renewed.deviceIdentity.count == 32 && renewed.password.count == 8)
+    // The new identity is what later launches load.
+    #expect(try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment).deviceIdentity == renewed.deviceIdentity)
+}
