@@ -465,6 +465,44 @@ struct ConnectionModelTests {
         model.disconnect()
     }
 
+    @Test("A failed audio enable forgets the saved choice, so the next connection does not retry it")
+    func failedAudioForgetsChoice() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        defaults.set(true, forKey: ConnectionModel.computerAudioKey)
+        let adapter = ControlledAdapter()
+        adapter.failAudioEnable = true
+        let model = ConnectionModel(adapter: adapter, defaults: defaults, credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.setComputerAudioEnabled(true) // Not connected: must not be saved or applied.
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789")))
+        try await settle { model.phase == .connected && !model.isChangingAudio && model.errorMessage != nil }
+        #expect(!defaults.bool(forKey: ConnectionModel.computerAudioKey))
+        model.disconnect()
+        model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 2 }
+        adapter.events[1].yield(.connected(RemoteSessionInfo(partnerID: "123456789")))
+        try await settle { model.phase == .connected }
+        #expect(adapter.audioRequests == [true, false])
+        #expect(model.errorMessage == nil)
+        model.disconnect()
+    }
+
+    @Test("Saved volumes snap to a picker option and are applied without waiting for audio")
+    func audioVolumeLevels() async throws {
+        #expect(RemoteAudioPlayer.volumeLevel(nil) == 1)
+        #expect(RemoteAudioPlayer.volumeLevel(0) == 0.25)
+        #expect(RemoteAudioPlayer.volumeLevel(0.3) == 0.25)
+        #expect(RemoteAudioPlayer.volumeLevel(0.7) == 0.75)
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let player = RemoteAudioPlayer(defaults: defaults)
+        #expect(player.volume == 1)
+        defaults.set(0.5, forKey: RemoteAudioPlayer.volumeKey)
+        try await settle { player.volume == 0.5 }
+    }
+
     private func isolatedDefaults() throws -> UserDefaults {
         let suite = "MacViewerTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -497,7 +535,7 @@ struct ConnectionModelTests {
 @MainActor
 private final class ControlledAdapter: MacViewerSessionAdapter {
     struct Request { let partnerID: String; let password: String }
-    enum Failure: Error { case inputWrite }
+    enum Failure: Error { case inputWrite, audio }
 
     var availability: SessionAvailability { .available }
     var requests: [Request] = []
@@ -514,6 +552,7 @@ private final class ControlledAdapter: MacViewerSessionAdapter {
     var commands: [RemoteControlCommands.Message] = []
     var audioRequests: [Bool] = []
     var suspendNextAudio = false
+    var failAudioEnable = false
     var suspendedAudio: CheckedContinuation<Void, Never>?
 
     func connect(partnerID: String, password: String) async throws -> AsyncThrowingStream<RemoteSessionEvent, Error> {
@@ -549,6 +588,7 @@ private final class ControlledAdapter: MacViewerSessionAdapter {
 
     func setComputerAudioEnabled(_ enabled: Bool) async throws {
         audioRequests.append(enabled)
+        if enabled, failAudioEnable { throw Failure.audio }
         if suspendNextAudio {
             suspendNextAudio = false
             await withCheckedContinuation { suspendedAudio = $0 }

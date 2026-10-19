@@ -10,6 +10,7 @@ public actor FramedTCPTransport {
         case invalidPort
         case invalidTLSName
         case connectionTimedOut
+        case untrustedRelayCertificate
         case notOpen
         case closed
         case truncatedFrame
@@ -20,6 +21,8 @@ public actor FramedTCPTransport {
             case .alreadyOpen: "The network connection is already open."
             case .invalidPort, .invalidTLSName: "The relay returned an invalid network address."
             case .connectionTimedOut: "The UltraViewer relay did not respond. Check the connection and try again."
+            case .untrustedRelayCertificate:
+                "The UltraViewer relay assigned to this session has an invalid or expired security certificate. Try again later."
             case .notOpen, .closed: "The UltraViewer network connection closed. Try connecting again."
             case .truncatedFrame: "The relay connection ended before an update finished. Try connecting again."
             case .consumerTooSlow: "The remote connection could not process its updates. Try connecting again."
@@ -153,6 +156,10 @@ public actor FramedTCPTransport {
             let continuation = opening
             opening = nil
             continuation?.resume()
+        // A rejected certificate parks the connection in .waiting and retries
+        // forever; fail now instead of reporting a misleading timeout.
+        case .waiting(.tls), .failed(.tls):
+            finish(Error.untrustedRelayCertificate)
         case let .failed(error): finish(error)
         case .cancelled: finish(Error.closed)
         default: break

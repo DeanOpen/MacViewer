@@ -20,6 +20,7 @@ final class RemoteAudioPlayer {
     }
 
     static let volumeKey = "MacViewer.audioVolume"
+    static let volumeLevels = [0.25, 0.5, 0.75, 1.0]
     private static let sampleRate = 48_000.0
     private static let maximumQueuedFrames = 12_000 // 250ms at the source rate.
     private let engine = AVAudioEngine()
@@ -30,12 +31,29 @@ final class RemoteAudioPlayer {
     private var generation = UUID()
     private var queuedFrames = 0
     private var configurationObserver: AnyCancellable?
+    private var volumeObserver: AnyCancellable?
+    private let defaults: UserDefaults
     private(set) var isEnabled = false
 
     /// Report asynchronous output-device restart failures to the session UI.
     var onPlaybackError: ((Swift.Error) -> Void)?
 
-    init() {
+    /// Snaps a stored volume to a picker option so the picker and playback agree.
+    static func volumeLevel(_ stored: Double?) -> Double {
+        guard let stored else { return 1 }
+        return volumeLevels.min { abs($0 - stored) < abs($1 - stored) }!
+    }
+
+    var volume: Float { player.volume }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        volumeObserver = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification, object: defaults)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.applyVolume() }
+            }
+        applyVolume()
         configurationObserver = NotificationCenter.default
             .publisher(for: .AVAudioEngineConfigurationChange, object: engine)
             .sink { [weak self] _ in
@@ -94,7 +112,6 @@ final class RemoteAudioPlayer {
                 channels[1][frame] = Float(right) / 32_768
             }
         }
-        player.volume = Float(UserDefaults.standard.object(forKey: Self.volumeKey) as? Double ?? 1)
         let activeGeneration = generation
         queuedFrames += frames
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
@@ -124,6 +141,10 @@ final class RemoteAudioPlayer {
             engine.prepare()
             try engine.start()
         }
+    }
+
+    private func applyVolume() {
+        player.volume = Float(Self.volumeLevel(defaults.object(forKey: Self.volumeKey) as? Double))
     }
 
     private func discardQueuedAudio() {
