@@ -210,7 +210,7 @@
 "Remote control paused. Check Accessibility permission." = "Đã tạm dừng điều khiển. Hãy kiểm tra quyền Trợ năng.";
 "Remote control is paused because a required macOS permission is unavailable." = "Đã tạm dừng điều khiển do thiếu quyền cần thiết trên macOS.";
 "The UltraViewer relay did not respond. Check the connection and try again." = "Máy chủ chuyển tiếp UltraViewer không phản hồi. Kiểm tra kết nối rồi thử lại.";
-"The UltraViewer relay assigned to this session has an invalid or expired security certificate. Try again later." = "Máy chủ chuyển tiếp UltraViewer được chỉ định cho phiên này có chứng chỉ bảo mật không hợp lệ hoặc đã hết hạn. Vui lòng thử lại sau.";
+"The UltraViewer relay assigned to this session (%@) has an invalid security certificate: %@. Try again later." = "Máy chủ chuyển tiếp UltraViewer được chỉ định cho phiên này (%@) có chứng chỉ bảo mật không hợp lệ: %@. Vui lòng thử lại sau.";
 "Incoming" = "Kết nối đến";
 "Outgoing" = "Kết nối đi";
 "Connected to %@." = "Đã kết nối với %@.";

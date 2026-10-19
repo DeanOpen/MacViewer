@@ -10,7 +10,7 @@ public actor FramedTCPTransport {
         case invalidPort
         case invalidTLSName
         case connectionTimedOut
-        case untrustedRelayCertificate
+        case untrustedRelayCertificate(host: String, reason: String)
         case notOpen
         case closed
         case truncatedFrame
@@ -21,8 +21,8 @@ public actor FramedTCPTransport {
             case .alreadyOpen: "The network connection is already open."
             case .invalidPort, .invalidTLSName: "The relay returned an invalid network address."
             case .connectionTimedOut: "The UltraViewer relay did not respond. Check the connection and try again."
-            case .untrustedRelayCertificate:
-                "The UltraViewer relay assigned to this session has an invalid or expired security certificate. Try again later."
+            case let .untrustedRelayCertificate(host, reason):
+                "The UltraViewer relay assigned to this session (\(host)) has an invalid security certificate: \(reason). Try again later."
             case .notOpen, .closed: "The UltraViewer network connection closed. Try connecting again."
             case .truncatedFrame: "The relay connection ended before an update finished. Try connecting again."
             case .consumerTooSlow: "The remote connection could not process its updates. Try connecting again."
@@ -47,6 +47,9 @@ public actor FramedTCPTransport {
     private var identity = UUID()
     private var ready = false
     private let queue = DispatchQueue(label: "MacViewer.tcp")
+    /// Why the latest open rejected its certificate, for the error message.
+    private var certificateRejection = CertificateRejection()
+    private var certificateHost = ""
     private let maximumPayloadLength: Int
     /// Latest opened stream's HTTP status, retained after close for diagnostics.
     public private(set) var receivedHTTPStatusCode: Int?
@@ -81,14 +84,12 @@ public actor FramedTCPTransport {
             let tls = NWProtocolTLS.Options()
             sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, serverName)
             if let certificateName {
+                let rejection = CertificateRejection()
+                certificateRejection = rejection
+                certificateHost = certificateName
                 sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, protocolTrust, complete in
                     let trust = sec_trust_copy_ref(protocolTrust).takeRetainedValue()
-                    let policy = SecPolicyCreateSSL(true, certificateName as CFString)
-                    guard SecTrustSetPolicies(trust, policy) == errSecSuccess else {
-                        complete(false)
-                        return
-                    }
-                    complete(SecTrustEvaluateWithError(trust, nil))
+                    complete(Self.verify(trust, name: certificateName, rejection: rejection))
                 }, queue)
             }
             parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
@@ -158,11 +159,41 @@ public actor FramedTCPTransport {
             continuation?.resume()
         // A rejected certificate otherwise waits silently until the timeout.
         case .waiting(.tls), .failed(.tls):
-            finish(Error.untrustedRelayCertificate)
+            finish(Error.untrustedRelayCertificate(host: certificateHost,
+                reason: certificateRejection.reason ?? "the secure connection could not be established"))
         case let .failed(error): finish(error)
         case .cancelled: finish(Error.closed)
         default: break
         }
+    }
+
+    /// Requires a trusted chain for `name`. Some UltraViewer relays keep
+    /// serving their certificate after it expires, and the Windows client
+    /// still connects to them, so an expired certificate is accepted when it
+    /// is otherwise valid: issued by a trusted authority for this name.
+    nonisolated static func verify(_ trust: SecTrust, name: String, rejection: CertificateRejection) -> Bool {
+        let policy = SecPolicyCreateSSL(true, name as CFString)
+        guard SecTrustSetPolicies(trust, policy) == errSecSuccess else {
+            rejection.reason = "its certificate could not be checked"
+            return false
+        }
+        var error: CFError?
+        if SecTrustEvaluateWithError(trust, &error) { return true }
+        let firstReason = error.map(reasonText)
+        guard SecTrustSetOptions(trust, [.allowExpired, .allowExpiredRoot]) == errSecSuccess else {
+            rejection.reason = firstReason
+            return false
+        }
+        error = nil
+        if SecTrustEvaluateWithError(trust, &error) { return true }
+        rejection.reason = error.map(reasonText) ?? firstReason
+        return false
+    }
+
+    private nonisolated static func reasonText(_ error: CFError) -> String {
+        var text = CFErrorCopyDescription(error) as String
+        while text.hasSuffix(".") { text.removeLast() }
+        return text
     }
 
     private func timedOut(token: UUID) {
@@ -242,5 +273,16 @@ public actor FramedTCPTransport {
         frames = nil
         if let error { stream?.finish(throwing: error) }
         else { stream?.finish() }
+    }
+}
+
+/// Carries a certificate rejection reason from Network's queue to the actor.
+final class CertificateRejection: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String?
+
+    var reason: String? {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
     }
 }
