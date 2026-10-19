@@ -50,8 +50,28 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var status = "Enter the ID and password from the Windows computer."
     @Published private(set) var errorMessage: String?
     @Published private(set) var remoteInfo: RemoteSessionInfo?
-    @Published private(set) var frame: RemoteScreenFrame?
-    @Published private(set) var displayedFrame: RemoteScreenFrame?
+    // Frames and the remote cursor change many times per second. They are not
+    // @Published: republishing them re-rendered the whole window on every
+    // frame. The screen view reads them from `screenFeed` instead, and SwiftUI
+    // only sees the sizes, which change rarely.
+    private(set) var frame: RemoteScreenFrame? {
+        didSet {
+            let size = frame.map { CGSize(width: $0.image.width, height: $0.image.height) }
+            if remoteScreenSize != size { remoteScreenSize = size }
+        }
+    }
+    private(set) var displayedFrame: RemoteScreenFrame? {
+        didSet {
+            let size = displayedFrame.map { CGSize(width: $0.image.width, height: $0.image.height) }
+            if displayedSize != size { displayedSize = size }
+            screenFeed.show(displayedFrame?.image)
+        }
+    }
+    /// Pixel size of the whole remote desktop, or nil before the first frame.
+    @Published private(set) var remoteScreenSize: CGSize?
+    /// Pixel size of the shown monitor, or nil while no image is shown.
+    @Published private(set) var displayedSize: CGSize?
+    let screenFeed = RemoteScreenFeed()
     @Published private(set) var selectedMonitor = 0
     @Published private(set) var recentPartners: [String]
     /// Local nicknames for partner IDs; never sent to the other computer.
@@ -60,7 +80,9 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var computerAudioEnabled = false
     @Published private(set) var isChangingAudio = false
     @Published private(set) var showRemoteCursor = true
-    @Published private(set) var remoteCursor: RemoteCursorPresenter.Snapshot?
+    private(set) var remoteCursor: RemoteCursorPresenter.Snapshot? {
+        didSet { screenFeed.showCursor(remoteCursor) }
+    }
 
     let adapter: any MacViewerSessionAdapter
     let tools = SessionToolsModel()

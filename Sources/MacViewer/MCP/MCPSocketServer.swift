@@ -10,11 +10,37 @@ enum MCPSocketLocation {
     static var path: String { directory.appendingPathComponent("mcp.sock").path }
 }
 
+/// The program on the other end of an MCP connection. Agents normally reach
+/// MacViewer through the bundled helper, so the agent is the helper's parent.
+/// Unlike the name an agent reports, this cannot be chosen by the agent.
+enum MCPPeerProcess {
+    static let helperName = "macviewer-mcp"
+
+    static func agentPath(socket fd: Int32) -> String? {
+        var pid: pid_t = 0
+        var length = socklen_t(MemoryLayout<pid_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0, pid > 0,
+              let path = executablePath(pid) else { return nil }
+        guard (path as NSString).lastPathComponent == helperName else { return path }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_ppid > 1 else { return nil }
+        return executablePath(pid_t(info.pbi_ppid))
+    }
+
+    private static func executablePath(_ pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return String(cString: buffer)
+    }
+}
+
 /// A Unix-domain socket that only this user can open. Each connection carries
 /// newline-delimited JSON-RPC messages relayed by the helper.
 final class MCPSocketServer: @unchecked Sendable {
     typealias ConnectionID = Int
-    var onConnect: (@Sendable (ConnectionID) -> Void)?
+    /// Called with the agent's executable path, when it can be found.
+    var onConnect: (@Sendable (ConnectionID, String?) -> Void)?
     var onLine: (@Sendable (ConnectionID, String) -> Void)?
     var onClose: (@Sendable (ConnectionID) -> Void)?
 
@@ -139,7 +165,7 @@ final class MCPSocketServer: @unchecked Sendable {
             connections[id] = connection
             source.setEventHandler { [weak self] in self?.read(id) }
             source.resume()
-            onConnect?(id)
+            onConnect?(id, MCPPeerProcess.agentPath(socket: fd))
         }
     }
 

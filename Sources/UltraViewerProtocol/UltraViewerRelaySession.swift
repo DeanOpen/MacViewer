@@ -46,7 +46,9 @@ public actor UltraViewerRelaySession {
         case status(String)
         case accepted(Peer)
         case screenChanged(Peer)
-        case frame(ModernScreenBitmap)
+        /// A new screen is ready. Call `take()` for the newest bitmap; frames
+        /// that arrived while the consumer was busy are skipped.
+        case frame(LatestScreenFrame)
         case inputPermission(Bool)
         case chat(String)
         case typing(Bool)
@@ -140,6 +142,7 @@ public actor UltraViewerRelaySession {
     private var deadline: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
     private var events: AsyncThrowingStream<Event, any Swift.Error>.Continuation?
+    private var latestFrame = LatestScreenFrame()
     private var renderer: ModernScreenRenderer?
     private var registrationReply: ClientRegistration.Reply?
     private var peerInfo: PeerLookup.PeerInfo?
@@ -200,8 +203,12 @@ public actor UltraViewerRelaySession {
         let token = UUID()
         generation = token
         phase = .registering
-        let pair = AsyncThrowingStream<Event, any Swift.Error>.makeStream(bufferingPolicy: .bufferingOldest(8))
+        // Frames take at most one slot (see LatestScreenFrame), so the rest of
+        // the buffer absorbs short UI stalls without dropping chat, clipboard
+        // or file events.
+        let pair = AsyncThrowingStream<Event, any Swift.Error>.makeStream(bufferingPolicy: .bufferingOldest(256))
         events = pair.continuation
+        latestFrame = LatestScreenFrame()
         pair.continuation.onTermination = { [weak self] _ in Task { await self?.close(ifGeneration: token) } }
         commandTask = Task { [weak self] in await self?.begin(configuration, token: token) }
         return pair.stream
@@ -779,6 +786,9 @@ public actor UltraViewerRelaySession {
                 supportsBinaryKeyboard: Self.version(version, atLeast: [6, 2, 13]),
                 allowsRemoteInput: !remoteViewOnly,
                 monitors: (try? RemoteControlCommands.monitors(from: initialization.monitorInformationBytes ?? Data())) ?? [])
+            // Frames for the new screen must not reach the consumer ahead of
+            // this event through a frame event that is still queued.
+            latestFrame = LatestScreenFrame()
             try emit(previouslyAccepted ? .screenChanged(peer) : .accepted(peer))
             if upgradingID != nil { try emit(.status("Connected directly over the local network.")) }
             else if previouslyAccepted { try emit(.status("Windows screen refreshed.")) }
@@ -797,7 +807,7 @@ public actor UltraViewerRelaySession {
                 diagnostics.decodeNanoseconds += elapsed
                 diagnostics.maximumDecodeNanoseconds = max(diagnostics.maximumDecodeNanoseconds, elapsed)
                 diagnostics.decodedFrames += 1
-                try emit(.frame(bitmap))
+                if latestFrame.put(bitmap) { try emit(.frame(latestFrame)) }
                 // Backpressure follows successful decoding, so a slow client
                 // cannot acknowledge a growing queue of stale screen updates.
                 try await sendToPeer(Data("18".utf8))
@@ -919,7 +929,10 @@ public actor UltraViewerRelaySession {
         case .terminated: throw CancellationError()
         case .dropped:
             switch event {
-            case .frame, .computerAudio, .cursor: break
+            // Clear the dropped frame so the next one is announced again.
+            case let .frame(latest): _ = latest.take()
+            // Losing one only skips a moment of sound, cursor or progress.
+            case .computerAudio, .cursor, .fileProgress: break
             default: throw Failure.consumerTooSlow
             }
         default: break

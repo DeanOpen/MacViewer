@@ -191,6 +191,40 @@ struct MCPSessionTests {
         #expect(host.calls.first?.0 == "click" && host.calls.first?.1["x"] == 5 && host.calls.first?.2 == "claude-code")
     }
 
+    @Test("The connection's program stays with the client, so a copied name gets a different trust key")
+    func programBindsTrust() async throws {
+        final class Recorder: MCPToolHost {
+            var client: MCPClientInfo?
+            func callTool(_ name: String, arguments: JSONValue, client: MCPClientInfo) async -> MCPToolResult {
+                self.client = client
+                return .text("ok")
+            }
+        }
+        let initialize = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"claude-code","title":"Claude Code"}}}"#
+        let call = #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"session_status"}}"#
+        var keys: [String] = []
+        for program in ["/Applications/Claude.app/Contents/MacOS/Claude", "/tmp/impostor"] {
+            let host = Recorder()
+            let session = MCPSession(host: host, program: program)
+            _ = await session.handle(initialize)
+            _ = await session.handle(call)
+            let client = try #require(host.client)
+            #expect(client.name == "Claude Code" && client.program == program)
+            keys.append(client.trustKey)
+        }
+        #expect(keys[0] != keys[1])
+        #expect(MCPClientInfo(name: "Claude Code", version: nil).trustKey != "Claude Code")
+    }
+
+    @Test("The peer program of a local socket is the process holding the other end")
+    func peerProgram() throws {
+        var fds: [Int32] = [0, 0]
+        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
+        defer { close(fds[0]); close(fds[1]) }
+        let path = try #require(MCPPeerProcess.agentPath(socket: fds[0]))
+        #expect(path.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: path))
+    }
+
     @Test("Errors follow JSON-RPC: parse errors, unknown methods and unknown tools")
     func errors() async throws {
         let session = MCPSession(host: FakeHost())
