@@ -498,3 +498,4 @@
 "Clipboard off" = "Clipboard off";
 "Turn On" = "Turn On";
 "Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Clipboard sharing is off. Text copied on one computer can't be pasted on the other.";
+"Too many wrong passwords. New connections are refused for 5 minutes." = "Too many wrong passwords. New connections are refused for 5 minutes.";

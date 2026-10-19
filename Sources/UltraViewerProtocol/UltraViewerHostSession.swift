@@ -116,6 +116,7 @@ public actor UltraViewerHostSession {
     private var fileSending = false
     private var fileSendRevision = UUID()
     private var sideSwitch = HostSideSwitchApprovalGate()
+    private var loginThrottle = HostLoginThrottle()
     private var pendingFrame: HostedScreenFrame?
     private var lastFrame: HostedScreenFrame?
     private var nextSequence = HostedScreenMessage.firstFrameNumber
@@ -406,12 +407,18 @@ public actor UltraViewerHostSession {
     private func consumePeer(_ payload: Data, route: Route, token: UUID) async throws {
         if payload.starts(with: Data("login:".utf8)) {
             diagnostics.loginAttempts += 1
-            guard let config = configuration,
+            let now = Date()
+            guard !loginThrottle.isLocked(at: now), let config = configuration,
                   let login = try? HostLoginRequest.decode(payload),
                   (try? login.verify(randomPassword: config.registration.password)) == true else {
+                let startsLockout = loginThrottle.recordFailure(at: now)
                 try await send(try MultipartPayload.encode([Data([22])]), route: route)
+                if startsLockout {
+                    try emit(.status("Too many wrong passwords. New connections are refused for 5 minutes."))
+                }
                 return
             }
+            loginThrottle.recordSuccess()
             diagnostics.passwordVerified = true
             guard login.displayColors == 2, Self.supportedVersion(login.clientVersion),
                   !login.connectionHashKey.isEmpty, login.connectionHashKey.utf8.count <= 128 else {
