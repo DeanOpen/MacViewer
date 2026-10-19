@@ -64,8 +64,8 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                         pair.continuation.yield(.connected(RemoteSessionInfo(partnerID: partnerID,
                             displayName: info.displayName, allowsRemoteInput: info.allowsRemoteInput,
                             monitors: info.monitors, virtualLeft: info.virtualLeft, virtualTop: info.virtualTop)))
-                    case let .frame(bitmap):
-                        guard let image = bitmap.makeCGImage() else { continue }
+                    case let .frame(latest):
+                        guard let image = latest.take()?.makeCGImage() else { continue }
                         pair.continuation.yield(.frame(RemoteScreenFrame(image: image)))
                     case let .screenChanged(info):
                         self.peer = info
