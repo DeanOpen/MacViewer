@@ -42,14 +42,38 @@ struct SessionToolsModelTests {
         #expect(sharing.first == true)
     }
 
-    @Test("Clipboard sharing starts with the session by default, without sending existing contents")
-    func clipboardOnByDefault() async throws {
+    @Test("Clipboard sharing is off by default: nothing is sent and the Mac clipboard is untouched")
+    func clipboardOffByDefault() async throws {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
         board.setString("existing private fixture", forType: .string)
         let suite = "SessionToolsModelTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        let model = SessionToolsModel(pasteboard: board, defaults: defaults)
+        var sent: [String] = [], sharing: [Bool] = []
+        model.activate(sendChat: { _ in }, sendClipboard: { sent.append($0) }, setSharing: { sharing.append($0) })
+        for _ in 0..<100 { await Task.yield() }
+        #expect(!model.clipboardEnabled)
+        #expect(sharing.isEmpty)
+        board.clearContents()
+        board.setString("copied password", forType: .string)
+        await model.pollClipboardOnce()
+        #expect(sent.isEmpty)
+        model.receiveClipboard("planted by the remote computer")
+        #expect(board.string(forType: .string) == "copied password")
+        model.deactivate()
+    }
+
+    @Test("When turned on in Settings, sharing starts with the session without sending existing contents")
+    func clipboardOnFromSettings() async throws {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setString("existing private fixture", forType: .string)
+        let suite = "SessionToolsModelTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: SessionToolsModel.shareClipboardKey)
         let model = SessionToolsModel(pasteboard: board, defaults: defaults)
         var sent: [String] = []
         model.activate(sendChat: { _ in }, sendClipboard: { sent.append($0) }, setSharing: { _ in })

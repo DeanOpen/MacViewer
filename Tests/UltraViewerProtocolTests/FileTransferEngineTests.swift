@@ -63,6 +63,22 @@ struct FileTransferEngineTests {
         }
     }
 
+    @Test("Saved files are quarantined so Gatekeeper checks them on first open")
+    func savedFilesAreQuarantined() throws {
+        let folder = try fileFixtureFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let destination = folder.appendingPathComponent("received.command")
+        var receiver = FileTransferEngine()
+        _ = receiver.consume(.offer(FileTransferOffer(transferID: "123", fileName: "received.command", size: 0)))
+        _ = try receiver.accept("123", to: destination)
+        var buffer = [CChar](repeating: 0, count: 128)
+        let length = Darwin.getxattr(destination.path, "com.apple.quarantine", &buffer, buffer.count, 0, 0)
+        #expect(length > 0)
+        let value = String(decoding: buffer.prefix(max(length, 0)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        #expect(value.hasPrefix("0081;"))
+        #expect(value.hasSuffix(";MacViewer;"))
+    }
+
     @Test("No file is created before Save; duplicate offers preserve accepted state")
     func explicitAcceptAndDuplicateOffer() throws {
         let folder = try fileFixtureFolder()

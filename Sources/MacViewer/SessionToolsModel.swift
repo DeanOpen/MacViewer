@@ -72,15 +72,16 @@ final class SessionToolsModel: ObservableObject {
     private var clipboardChange = 0
     private var latestClipboardText: String?
 
-    /// Like UltraViewer on Windows, clipboard sharing starts with each session
-    /// unless turned off in Settings.
+    /// Clipboard sharing is opt-in: copied passwords or codes must not reach
+    /// the other computer, and it must not replace this Mac's clipboard,
+    /// unless sharing was turned on in Settings or for the session.
     static let shareClipboardKey = "MacViewer.shareClipboard"
     private let defaults: UserDefaults
 
     init(pasteboard: NSPasteboard = .general, defaults: UserDefaults = .standard) {
         self.pasteboard = pasteboard
         self.defaults = defaults
-        defaults.register(defaults: [Self.shareClipboardKey: true])
+        defaults.register(defaults: [Self.shareClipboardKey: false])
     }
 
     func activate(sendChat: @escaping SendText, sendClipboard: @escaping SendText,

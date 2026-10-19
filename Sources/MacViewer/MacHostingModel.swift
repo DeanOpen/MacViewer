@@ -131,7 +131,9 @@ final class MacHostingModel: ObservableObject {
                     case let .typing(sessionID, active):
                         if viewer?.id == sessionID, phase == .sharing { tools.receiveTyping(active) }
                     case let .clipboard(sessionID, text):
-                        if viewer?.id == sessionID, phase == .sharing { tools.receiveClipboard(text) }
+                        // A view-only viewer must not be able to plant text
+                        // that the local user later pastes.
+                        if viewer?.id == sessionID, phase == .sharing, allowsControl { tools.receiveClipboard(text) }
                     case let .fileOffer(sessionID, offer):
                         if viewer?.id == sessionID, phase == .sharing {
                             tools.receiveFileOffer(id: offer.transferID, name: offer.fileName, size: offer.size)
