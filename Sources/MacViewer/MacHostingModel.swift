@@ -312,6 +312,26 @@ final class MacHostingModel: ObservableObject {
         }
     }
 
+    /// Nobody is connected or asking to connect, so the password can change.
+    var canResetPassword: Bool { phase != .sharing && phase != .awaitingApproval && phase != .registering }
+
+    /// Makes a new password for this Mac. The ID stays the same; sharing that
+    /// was on restarts so UltraViewer learns the new password.
+    func resetPassword() {
+        guard canResetPassword else { return }
+        let wasRunning = isRunning
+        if wasRunning { stop() }
+        do { _ = try MacRegistrationProfile.loadOrCreate(forHosting: true, regeneratePassword: true) }
+        catch { errorMessage = "A new password could not be created: \(error.localizedDescription)"; return }
+        if wasRunning {
+            let previous = stopping
+            Task { [weak self] in
+                await previous?.value
+                self?.start()
+            }
+        }
+    }
+
     /// Stops sharing and waits until a connected viewer has been told.
     func shutdown() async {
         stop()

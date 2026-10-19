@@ -20,6 +20,10 @@ protocol MacViewerSessionAdapter: AnyObject {
     func sendClipboard(_ text: String) async throws
     func setClipboardSharing(_ enabled: Bool) async throws
     func setComputerAudioEnabled(_ enabled: Bool) async throws
+    /// Offers a file to the other computer; returns its transfer ID.
+    func sendFile(_ url: URL) async throws -> String
+    func acceptFile(_ transferID: String, to destination: URL) async throws
+    func cancelFile(_ transferID: String) async throws
     func disconnect()
     /// Waits until the goodbye and socket close started by `disconnect()` finish.
     func waitUntilClosed() async
@@ -34,6 +38,9 @@ extension MacViewerSessionAdapter {
     func sendClipboard(_ text: String) async throws { throw NativeSessionError.unavailable("Clipboard sharing is unavailable for this connection.") }
     func setClipboardSharing(_ enabled: Bool) async throws { throw NativeSessionError.unavailable("Clipboard sharing is unavailable for this connection.") }
     func setComputerAudioEnabled(_ enabled: Bool) async throws { throw NativeSessionError.unavailable("Computer audio is unavailable for this connection.") }
+    func sendFile(_ url: URL) async throws -> String { throw NativeSessionError.unavailable("File transfer is unavailable for this connection.") }
+    func acceptFile(_ transferID: String, to destination: URL) async throws { throw NativeSessionError.unavailable("File transfer is unavailable for this connection.") }
+    func cancelFile(_ transferID: String) async throws {}
     func waitUntilClosed() async {}
 }
 
@@ -72,6 +79,12 @@ enum RemoteSessionEvent {
     case clipboard(String)
     case computerAudio(Data)
     case cursor(CursorMessage)
+    /// The Windows computer offers a file; nothing is saved until it is accepted.
+    case fileOffer(transferID: String, name: String, size: Int64)
+    /// Bytes moved so far, in either direction.
+    case fileProgress(transferID: String, bytes: Int64)
+    case fileCompleted(transferID: String)
+    case fileCanceled(transferID: String)
     case disconnected(String?)
 }
 

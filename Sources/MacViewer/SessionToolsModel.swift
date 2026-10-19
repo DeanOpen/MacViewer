@@ -15,6 +15,15 @@ struct SessionChatMessage: Identifiable, Equatable {
     let timestamp = Date()
     let text: String
     let isOutgoing: Bool
+    /// Set when this transcript entry is a file; its state lives in `transfers`.
+    var transferID: String? = nil
+}
+
+/// File transfer operations of the current session.
+struct SessionFileActions {
+    let send: @MainActor (URL) async throws -> String
+    let accept: @MainActor (String, URL) async throws -> Void
+    let cancel: @MainActor (String) async throws -> Void
 }
 
 /// Per-session text tools. Clipboard polling starts only after an explicit
@@ -35,6 +44,8 @@ final class SessionToolsModel: ObservableObject {
     @Published private(set) var clipboardHistory: [SessionClipboardEntry] = []
     /// Short-lived notice after text is shared ("Copied from…", "Sent to…").
     @Published private(set) var clipboardNotice: String?
+    @Published private(set) var transfers: [String: SessionFileTransfer] = [:]
+    private var fileActions: SessionFileActions?
     private var noticeTask: Task<Void, Never>?
 
     typealias SendText = @MainActor (String) async throws -> Void
@@ -67,11 +78,12 @@ final class SessionToolsModel: ObservableObject {
     }
 
     func activate(sendChat: @escaping SendText, sendClipboard: @escaping SendText,
-                  setSharing: @escaping SetSharing, sendTyping: SendTyping? = nil) {
+                  setSharing: @escaping SetSharing, sendTyping: SendTyping? = nil,
+                  files: SessionFileActions? = nil) {
         deactivate()
         self.sendChat = sendChat; self.sendClipboard = sendClipboard; self.setSharing = setSharing
-        self.sendTyping = sendTyping
-        messages = []; draft = ""; errorMessage = nil; isActive = true
+        self.sendTyping = sendTyping; fileActions = files
+        messages = []; transfers = [:]; draft = ""; errorMessage = nil; isActive = true
         if defaults.bool(forKey: Self.shareClipboardKey) { setClipboardEnabled(true) }
     }
 
@@ -83,7 +95,10 @@ final class SessionToolsModel: ObservableObject {
         clipboardTask?.cancel(); clipboardTask = nil
         clipboardSetup?.cancel(); clipboardSetup = nil
         sendChat = nil; sendClipboard = nil; setSharing = nil
-        sendTyping = nil
+        sendTyping = nil; fileActions = nil
+        for (id, transfer) in transfers where !transfer.isFinished {
+            transfers[id]?.state = .failed("The connection ended.")
+        }
         isActive = false; isSending = false; clipboardEnabled = false; isUpdatingClipboard = false
         latestClipboardText = nil
         clipboardStatus = "Clipboard sharing is off."
@@ -234,8 +249,90 @@ final class SessionToolsModel: ObservableObject {
         }
     }
 
-    private func append(_ text: String, outgoing: Bool) {
-        messages.append(SessionChatMessage(text: text, isOutgoing: outgoing))
+    // MARK: Files
+
+    var canTransferFiles: Bool { isActive && fileActions != nil }
+
+    /// Offers each file to the other computer as its own chat entry.
+    func sendFiles(_ urls: [URL]) {
+        guard isActive, let fileActions else { return }
+        let token = generation
+        for url in urls where !url.hasDirectoryPath {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+            Task { [weak self] in
+                do {
+                    let id = try await fileActions.send(url)
+                    guard let self, generation == token else { return }
+                    transfers[id] = SessionFileTransfer(id: id, name: url.lastPathComponent, size: size,
+                                                        isOutgoing: true, state: .waiting)
+                    append(url.lastPathComponent, outgoing: true, transferID: id)
+                } catch {
+                    guard let self, generation == token else { return }
+                    errorMessage = "The file could not be sent."
+                }
+            }
+        }
+    }
+
+    func receiveFileOffer(id: String, name: String, size: Int64) {
+        guard isActive, transfers[id] == nil else { return }
+        transfers[id] = SessionFileTransfer(id: id, name: name, size: size, isOutgoing: false,
+                                            state: fileActions == nil ? .failed("Receiving files is unavailable.") : .offered)
+        append(name, outgoing: false, transferID: id)
+    }
+
+    /// Saves an offered file into the remembered folder; asks for it the first time.
+    func saveFile(_ id: String) {
+        guard isActive, let fileActions, let transfer = transfers[id], transfer.state == .offered else { return }
+        guard let folder = ReceivedFilesFolder.current() ?? ReceivedFilesFolder.choose() else { return }
+        let destination = ReceivedFilesFolder.uniqueURL(for: transfer.name, in: folder)
+        transfers[id]?.state = .transferring
+        transfers[id]?.location = destination
+        let token = generation
+        Task { [weak self] in
+            do { try await fileActions.accept(id, destination) }
+            catch {
+                guard let self, generation == token else { return }
+                transfers[id]?.state = .failed("The file could not be saved.")
+            }
+        }
+    }
+
+    func cancelFile(_ id: String) {
+        guard let transfer = transfers[id], !transfer.isFinished else { return }
+        transfers[id]?.state = .canceled
+        if !transfer.isOutgoing, transfer.state == .transferring, let location = transfer.location {
+            try? FileManager.default.removeItem(at: location)
+        }
+        let cancel = fileActions?.cancel
+        Task { try? await cancel?(id) }
+    }
+
+    func fileProgress(_ id: String, bytes: Int64) {
+        guard let transfer = transfers[id], !transfer.isFinished else { return }
+        transfers[id]?.bytes = bytes
+        transfers[id]?.state = .transferring
+    }
+
+    func fileCompleted(_ id: String) {
+        guard let transfer = transfers[id], !transfer.isFinished else { return }
+        transfers[id]?.bytes = transfer.size
+        transfers[id]?.state = .completed
+    }
+
+    func fileCanceled(_ id: String) {
+        guard let transfer = transfers[id], !transfer.isFinished else { return }
+        transfers[id]?.state = .canceled
+        if !transfer.isOutgoing, let location = transfer.location { try? FileManager.default.removeItem(at: location) }
+    }
+
+    func revealFile(_ id: String) {
+        guard let location = transfers[id]?.location else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([location])
+    }
+
+    private func append(_ text: String, outgoing: Bool, transferID: String? = nil) {
+        messages.append(SessionChatMessage(text: text, isOutgoing: outgoing, transferID: transferID))
         // Bound both transcript item count and text storage.
         while messages.count > 200 || messages.reduce(0, { $0 + $1.text.utf8.count }) > 1_048_576 {
             messages.removeFirst()

@@ -52,7 +52,10 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
   con trỏ chuột và **nghe âm thanh từ máy kia**
 - Chụp màn hình (chọn vùng, ghi chú lên ảnh) và **quay video**
 - **Chat** với người bên kia và đồng bộ **clipboard** hai chiều (tùy chọn)
+- **Gửi và nhận file** ngay trong chat: bấm 📎 hoặc kéo thả file vào khung chat,
+  bấm **Lưu** khi có file đến. Thư mục lưu được chọn một lần và đổi trong Cài đặt
 - Có thể lưu mật khẩu vào **Keychain** của macOS cho lần sau
+- **Đặt tên** cho các máy trong danh sách gần đây (chỉ lưu trên máy Mac)
 
 ### Cho người khác truy cập máy Mac
 
@@ -60,6 +63,8 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 - Có hướng dẫn từng bước để bật quyền **Ghi màn hình** và **Trợ năng**
 - Quyền xem và quyền điều khiển được duyệt riêng. Bạn có thể ngắt kết nối hoặc
   tạm khóa truy cập bất cứ lúc nào
+- Sao chép hoặc **tạo mật khẩu mới** cho máy Mac; ID giữ nguyên
+- Đặt **tên hiển thị** cho máy Mac trong Cài đặt (chữ không dấu, tối đa 20 ký tự)
 
 ### Khác
 
@@ -68,7 +73,8 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 
 ### Chưa hỗ trợ
 
-Gửi file, nói chuyện qua micro, phát âm thanh khi chia sẻ máy Mac, chia sẻ
+Gửi file khi máy Windows điều khiển máy Mac, nói chuyện qua micro, phát âm
+thanh khi chia sẻ máy Mac, chia sẻ
 nhiều màn hình Mac cùng lúc và truy cập không cần người ngồi máy. Chưa thử
 nghiệm với các bản UltraViewer cũ, bàn phím không phải kiểu US, bộ gõ ngoài
 tiếng Việt và tiếng Trung, và chế độ màu 8-bit.

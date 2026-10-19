@@ -52,7 +52,11 @@ Windows executable code.
   and **remote computer audio**
 - Screenshots with region selection and annotations, and **video recording**
 - Floating **chat** panel and opt-in two-way **clipboard** sharing
+- **Send and receive files** in chat: click 📎 or drop files on the chat, and
+  click **Save** on an incoming file. The save folder is chosen once and can be
+  changed in Settings
 - Optional password storage in the macOS **Keychain**
+- **Nicknames** for recent computers (kept on this Mac only)
 
 ### Share (share this Mac)
 
@@ -62,6 +66,8 @@ Windows executable code.
   permissions
 - You approve viewing or control separately. You can end a session or pause
   incoming access at any time.
+- Copy the Mac's password or **make a new one**; the ID stays the same
+- Set this Mac's **display name** in Settings (unaccented letters, up to 20)
 
 ### General
 
@@ -70,7 +76,8 @@ Windows executable code.
 
 ### Not supported yet
 
-File transfer, microphone/voice chat, Mac-host audio, sharing more than one Mac
+File transfer while Windows controls this Mac, microphone/voice chat, Mac-host
+audio, sharing more than one Mac
 display, and unattended Mac access. Older Windows UltraViewer versions,
 non-US keyboard layouts, input methods other than Vietnamese and Chinese,
 and 8-bit screen mode haven't been validated.

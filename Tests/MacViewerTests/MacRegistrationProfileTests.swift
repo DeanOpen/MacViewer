@@ -67,3 +67,42 @@ import UltraViewerProtocol
         try MacRegistrationProfile.selectNetwork(from: [tunnel], primaryInterface: "utun3")
     }
 }
+
+@Test func macDisplayNameFallsBackAndFitsTheLoginField() throws {
+    #expect(MacRegistrationProfile.loginWireName("Máy Kế Toán Đức") == "May Ke Toan Duc")
+    #expect(MacRegistrationProfile.loginWireName("Dean's Mac: #1 @home") == "Deans Mac 1 home")
+    #expect(MacRegistrationProfile.loginWireName("A very long display name here") == "A very long display")
+    #expect(MacRegistrationProfile.loginWireName("家") == "")
+    let suite = "MacViewer-display-name-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    #expect(MacRegistrationProfile.customDisplayName(defaults: defaults) == nil)
+    #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "MacViewer")
+    defaults.set("  家  ", forKey: MacRegistrationProfile.displayNameKey)
+    // Registration keeps Unicode (sent as UTF-8 Base64); login falls back to the default.
+    #expect(MacRegistrationProfile.customDisplayName(defaults: defaults) == "家")
+    #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "MacViewer")
+    defaults.set("Mac Văn Phòng", forKey: MacRegistrationProfile.displayNameKey)
+    #expect(MacRegistrationProfile.loginDisplayName(defaults: defaults) == "Mac Van Phong")
+}
+
+@Test func macRegistrationProfileNewPasswordKeepsTheDeviceIdentity() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("MacViewer-profile-reset-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let environment = MacRegistrationProfile.Environment(
+        network: .init(address: try RelayIPv4Address("192.0.2.5"), macAddress: "020000000001"),
+        hostName: "Mac", userName: "dean", operatingSystem: .init(majorVersion: 26, minorVersion: 0, patchVersion: 1))
+    let first = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment)
+    let same = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment)
+    #expect(same.password == first.password)
+    var changed = first
+    for _ in 0..<5 where changed.password == first.password {
+        changed = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment, regeneratePassword: true)
+    }
+    #expect(changed.deviceIdentity == first.deviceIdentity)
+    #expect(changed.password != first.password)
+    #expect(changed.password.count == 8 && changed.password.allSatisfy(\.isNumber))
+    // The new password is what later launches load.
+    #expect(try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment).password == changed.password)
+}

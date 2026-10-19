@@ -54,6 +54,11 @@ public actor UltraViewerRelaySession {
         case computerAudio(Data)
         case cursor(CursorMessage)
         case sideSwitchRequested(RemoteControlCommands.SideSwitchRequest)
+        case fileOffer(FileTransferOffer)
+        /// Bytes moved so far for a transfer in either direction.
+        case fileProgress(transferID: String, bytes: Int64)
+        case fileCompleted(transferID: String)
+        case fileCanceled(transferID: String)
     }
 
     public struct Diagnostics: Sendable, Encodable {
@@ -151,6 +156,27 @@ public actor UltraViewerRelaySession {
     private var peerPingStarted: UInt64?
     private var heartbeatTicks = 0
     private var capturedCommands: Set<UInt8> = []
+    /// File transfers of this session, keyed by transfer ID.
+    private var incomingFiles: [String: IncomingFile] = [:]
+    private var outgoingFiles: [String: OutgoingFile] = [:]
+
+    private struct IncomingFile {
+        let size: Int64
+        var handle: FileHandle?
+        var received: Int64 = 0
+    }
+
+    private struct OutgoingFile {
+        let handle: FileHandle
+        let size: Int64
+        var nextOffset: Int64 = 1      // 1-based, as on the wire
+        var acknowledged: Int64 = 0    // bytes the host confirmed
+        var inFlight: [Int64] = []     // sizes of parts sent but not yet confirmed
+    }
+
+    /// Part size and number of unconfirmed parts, as UltraViewer uses them.
+    private static let filePartSize = 32_000
+    private static let filePartsInFlight = 2
     public private(set) var diagnostics = Diagnostics()
 
     public init() {}
@@ -816,6 +842,47 @@ public actor UltraViewerRelaySession {
             }
             remoteViewOnly = value != 0
             if phase == .active { try emit(.inputPermission(!remoteViewOnly)) }
+        case FileTransferOffer.command:
+            guard phase == .active, let offer = FileTransferOffer.decode(parts: parts) else { return }
+            incomingFiles[offer.transferID] = IncomingFile(size: offer.size)
+            try emit(.fileOffer(offer))
+        case 14:
+            // The host accepts a file this Mac offered and asks for byte 1.
+            guard parts.count >= 2 else { return }
+            let id = String(decoding: parts[1], as: UTF8.self)
+            guard outgoingFiles[id] != nil else { return }
+            for _ in 0..<Self.filePartsInFlight { try await sendNextFilePart(id) }
+        case 21:
+            // The receiver confirms one data part.
+            guard parts.count >= 2 else { return }
+            let id = String(decoding: parts[1], as: UTF8.self)
+            if var file = outgoingFiles[id], !file.inFlight.isEmpty {
+                file.acknowledged += file.inFlight.removeFirst()
+                outgoingFiles[id] = file
+                try emit(.fileProgress(transferID: id, bytes: file.acknowledged))
+                if file.acknowledged >= file.size { finishOutgoing(id); try emit(.fileCompleted(transferID: id)) }
+                else { try await sendNextFilePart(id) }
+            }
+        case 15:
+            guard let chunk = FileTransferOffer.decodeChunk(parts: parts),
+                  var file = incomingFiles[chunk.transferID], let handle = file.handle else { return }
+            try handle.seek(toOffset: UInt64(chunk.offset - 1))
+            try handle.write(contentsOf: chunk.data)
+            file.received = max(file.received, Int64(chunk.offset - 1 + chunk.data.count))
+            incomingFiles[chunk.transferID] = file
+            let ack = FileTransferOffer.viewerChunkReceived(transferID: chunk.transferID)
+            try await sendToPeer(ack.payload, formatFlag: ack.formatFlag)
+            try emit(.fileProgress(transferID: chunk.transferID, bytes: file.received))
+            if file.received >= file.size {
+                try? handle.close(); incomingFiles[chunk.transferID] = nil
+                try emit(.fileCompleted(transferID: chunk.transferID))
+            }
+        case 16:
+            guard parts.count >= 2 else { return }
+            let id = String(decoding: parts[1], as: UTF8.self)
+            guard incomingFiles[id] != nil || outgoingFiles[id] != nil else { return }
+            closeFileTransfer(id)
+            try emit(.fileCanceled(transferID: id))
         default: break
         }
     }
@@ -901,6 +968,7 @@ public actor UltraViewerRelaySession {
     private func finish(_ error: (any Swift.Error)?) async {
         guard phase != .closed else { return }
         phase = .closed
+        for id in Array(incomingFiles.keys) + Array(outgoingFiles.keys) { closeFileTransfer(id) }
         generation = UUID()
         deadline?.cancel(); deadline = nil
         heartbeat?.cancel(); heartbeat = nil
@@ -933,6 +1001,66 @@ public actor UltraViewerRelaySession {
 
     private static func randomString(count: Int, alphabet: [Character]) -> String {
         String((0..<count).map { _ in alphabet.randomElement()! })
+    }
+
+    /// Offers the file at `url` to the Windows computer; returns the transfer ID.
+    /// Data is read one part at a time once the other side accepts.
+    public func sendFile(_ url: URL) async throws -> FileTransferOffer {
+        guard phase == .active else { throw Failure.notConnected }
+        let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let handle = try FileHandle(forReadingFrom: url)
+        let offer = FileTransferOffer(transferID: Self.newTransferID(), fileName: url.lastPathComponent, size: size)
+        outgoingFiles[offer.transferID] = OutgoingFile(handle: handle, size: size)
+        let message = offer.viewerToHost()
+        do { try await sendToPeer(message.payload, formatFlag: message.formatFlag) }
+        catch { finishOutgoing(offer.transferID); throw error }
+        return offer
+    }
+
+    /// Accepts an offered file and writes it to `destination` (replaced if present).
+    public func acceptFile(_ transferID: String, to destination: URL) async throws {
+        guard phase == .active, var file = incomingFiles[transferID] else { throw Failure.notConnected }
+        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        file.handle = try FileHandle(forWritingTo: destination)
+        incomingFiles[transferID] = file
+        let accept = FileTransferOffer.viewerAccept(transferID: transferID)
+        try await sendToPeer(accept.payload, formatFlag: accept.formatFlag)
+        if file.size == 0 { closeFileTransfer(transferID); try emit(.fileCompleted(transferID: transferID)) }
+    }
+
+    /// Declines an offer or stops a transfer in either direction.
+    public func cancelFile(_ transferID: String) async throws {
+        guard incomingFiles[transferID] != nil || outgoingFiles[transferID] != nil else { return }
+        closeFileTransfer(transferID)
+        guard phase == .active else { return }
+        let cancel = FileTransferOffer.viewerCancel(transferID: transferID)
+        try await sendToPeer(cancel.payload, formatFlag: cancel.formatFlag)
+    }
+
+    private func sendNextFilePart(_ id: String) async throws {
+        guard var file = outgoingFiles[id], file.nextOffset <= file.size else { return }
+        try file.handle.seek(toOffset: UInt64(file.nextOffset - 1))
+        let data = try file.handle.read(upToCount: Self.filePartSize) ?? Data()
+        guard !data.isEmpty else { return }
+        let offset = file.nextOffset
+        file.nextOffset += Int64(data.count)
+        file.inFlight.append(Int64(data.count))
+        outgoingFiles[id] = file
+        try await sendToPeer(FileTransferOffer.viewerChunk(transferID: id, offset: Int(offset), data: data), formatFlag: false)
+    }
+
+    private func finishOutgoing(_ id: String) {
+        try? outgoingFiles.removeValue(forKey: id)?.handle.close()
+    }
+
+    private func closeFileTransfer(_ id: String) {
+        finishOutgoing(id)
+        try? incomingFiles.removeValue(forKey: id)?.handle?.close()
+    }
+
+    private static func newTransferID() -> String {
+        // Same shape as the IDs Windows creates: 20 digits.
+        "3" + (0..<19).map { _ in String(Int.random(in: 0...9)) }.joined()
     }
 
     private func capture(_ payload: Data, command: UInt8) throws {

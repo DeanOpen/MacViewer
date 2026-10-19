@@ -19,6 +19,9 @@ struct ConnectionView: View {
     @State private var readMessages = 0
     @State private var remoteWallpaperVisible = true
     @State private var revealPassword = false
+    @State private var confirmPasswordReset = false
+    @State private var renamingPartner: String?
+    @State private var partnerNameDraft = ""
     @FocusState private var focusedField: Field?
     @Environment(\.locale) private var appLocale
     @State private var confirmSideSwitch = false
@@ -57,7 +60,14 @@ struct ConnectionView: View {
             } message: {
                 Text("End this incoming session and connect to the same Windows computer? Control will stay off until you enable it.")
             }
-        .onDisappear { remoteCapture.endSession(); model.disconnect(); hosting.stop() }
+        .onDisappear {
+            remoteCapture.endSession(); model.disconnect(); hosting.stop()
+            // An open Settings window would otherwise keep MacViewer running
+            // after its main window closed; closing it lets the app quit.
+            for window in NSApp.windows where window.identifier?.rawValue.contains("Settings") == true {
+                window.close()
+            }
+        }
         .onChange(of: hosting.identifier) { _, id in if id == nil { revealPassword = false } }
         .onChange(of: model.phase) { _, phase in
             if phase == .connecting || phase == .connected { showSession = true }
@@ -294,11 +304,22 @@ struct ConnectionView: View {
                             Button { revealPassword.toggle() } label: {
                                 Label(LocalizedStringKey(revealPassword ? "Hide" : "Show"), systemImage: revealPassword ? "eye.slash" : "eye")
                             }.buttonStyle(.borderless)
+                            Button { copy(hosting.password) } label: { Image(systemName: "doc.on.doc") }
+                                .buttonStyle(.borderless).help("Copy your password")
+                            Button { confirmPasswordReset = true } label: { Image(systemName: "arrow.clockwise") }
+                                .buttonStyle(.borderless).disabled(!hosting.canResetPassword)
+                                .help(hosting.canResetPassword ? "Make a new password" : "End the current connection to change the password")
                         } else {
                             Label("Available after starting sharing", systemImage: "lock")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                    .confirmationDialog("Make a new password?", isPresented: $confirmPasswordReset, titleVisibility: .visible) {
+                        Button("New Password") { hosting.resetPassword() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("The old password stops working. Your Mac’s ID stays the same.")
+                    }
                 }
                 } else {
                     HStack(spacing: 8) {
@@ -429,18 +450,24 @@ struct ConnectionView: View {
         }
     }
 
+    private func startRenaming(_ id: String) {
+        partnerNameDraft = model.partnerName(id) ?? ""
+        renamingPartner = id
+    }
+
     private var recentPartners: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Recent Windows computers").font(.headline)
-                    Text("Choose a computer to reuse its connection details.").font(.caption).foregroundStyle(.secondary)
+                    Text("Choose a computer to reuse its connection details. Use the pencil to rename it.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Clear history", action: model.clearRecentPartners).buttonStyle(.borderless).font(.caption)
             }
             VStack(spacing: 0) {
                 ForEach(model.recentPartners, id: \.self) { id in
+                    HStack(spacing: 0) {
                     Button {
                         model.selectRecent(id)
                         focusedField = .password
@@ -450,9 +477,14 @@ struct ConnectionView: View {
                                 .frame(width: 38, height: 38)
                                 .background(Color.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(formattedID(id)).font(.system(size: 16, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.primary)
-                                Text("Windows computer").font(.caption).foregroundStyle(.secondary)
+                                if let name = model.partnerName(id) {
+                                    Text(name).font(.system(size: 16, weight: .medium)).foregroundStyle(.primary).lineLimit(1)
+                                    Text(formattedID(id)).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                } else {
+                                    Text(formattedID(id)).font(.system(size: 16, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.primary)
+                                    Text("Windows computer").font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                             Text("Select").font(.callout.weight(.medium)).foregroundStyle(.blue)
@@ -462,13 +494,31 @@ struct ConnectionView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).disabled(model.isSessionActive)
-                    .contextMenu { Button("Remove from history") { model.removeRecent(id) } }
+                    // Renaming stays available during a session; only selecting is disabled.
+                    Button { startRenaming(id) } label: {
+                        Label("Rename", systemImage: "pencil").font(.callout.weight(.medium))
+                    }
+                    .buttonStyle(.bordered).tint(.blue).controlSize(.regular)
+                    .help("Rename this computer").padding(.trailing, 12)
+                    }
+                    .contextMenu {
+                        Button("Rename…") { startRenaming(id) }
+                        Button("Remove from history") { model.removeRecent(id) }
+                    }
                     if id != model.recentPartners.last { Divider().padding(.leading, 68) }
                 }
             }
             .background(cardBackground, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.08)))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .alert("Rename computer", isPresented: Binding(get: { renamingPartner != nil },
+                                                     set: { if !$0 { renamingPartner = nil } })) {
+            TextField("Name", text: $partnerNameDraft)
+            Button("Save") { if let id = renamingPartner { model.renamePartner(id, to: partnerNameDraft) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LF("Shown only on this Mac for %@. Leave empty to show the ID.", formattedID(renamingPartner ?? "")))
         }
     }
 
@@ -494,7 +544,7 @@ struct ConnectionView: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             Divider()
-            SessionToolsView(tools: model.tools, peerName: model.remoteInfo?.displayName ?? model.partnerID)
+            SessionToolsView(tools: model.tools, peerName: model.partnerName(model.partnerID) ?? model.remoteInfo?.displayName ?? model.partnerID)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -537,7 +587,7 @@ struct ConnectionView: View {
         VStack(spacing: 0) {
             if showSessionToolbar {
             RemoteSessionToolbar(
-                peerName: model.remoteInfo?.displayName ?? model.partnerID,
+                peerName: model.partnerName(model.partnerID) ?? model.remoteInfo?.displayName ?? model.partnerID,
                 isConnected: model.phase == .connected,
                 allowsControl: model.remoteInfo?.allowsRemoteInput == true,
                 controlEnabled: Binding(get: { model.controlEnabled }, set: { model.setControlEnabled($0) }),

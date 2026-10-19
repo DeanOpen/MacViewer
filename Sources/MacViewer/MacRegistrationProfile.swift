@@ -57,7 +57,7 @@ enum MacRegistrationProfile {
     private static let storageLock = NSLock()
     private static let maximumProfileBytes = 65_536
 
-    static func loadOrCreate(forHosting: Bool = false) throws -> ClientRegistration.Request {
+    static func loadOrCreate(forHosting: Bool = false, regeneratePassword: Bool = false) throws -> ClientRegistration.Request {
         guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
                                                      in: .userDomainMask).first else {
             throw ProfileError.invalidStorageLocation
@@ -65,13 +65,14 @@ enum MacRegistrationProfile {
         let directory = support.appendingPathComponent("MacViewer", isDirectory: true)
             .appendingPathComponent(forHosting ? "Host" : "Client", isDirectory: true)
         let process = ProcessInfo.processInfo
-        let environment = Environment(network: try discoverNetwork(), hostName: process.hostName,
+        let environment = Environment(network: try discoverNetwork(), hostName: customDisplayName() ?? process.hostName,
                                       userName: NSUserName(), operatingSystem: process.operatingSystemVersion)
-        return try loadOrCreate(in: directory, environment: environment)
+        return try loadOrCreate(in: directory, environment: environment, regeneratePassword: regeneratePassword)
     }
 
     /// Injected location/platform values keep tests away from the user's profile.
-    static func loadOrCreate(in directory: URL, environment: Environment) throws -> ClientRegistration.Request {
+    static func loadOrCreate(in directory: URL, environment: Environment,
+                             regeneratePassword: Bool = false) throws -> ClientRegistration.Request {
         storageLock.lock()
         defer { storageLock.unlock() }
         let manager = FileManager.default
@@ -102,10 +103,11 @@ enum MacRegistrationProfile {
                   stored.password.utf8.allSatisfy({ (48...57).contains($0) }) else {
                 throw ProfileError.invalidStoredProfile
             }
-            credentials = Credentials(deviceIdentity: stored.deviceIdentity, password: stored.password)
+            // A new password keeps the same device identity, and so the same ID.
+            credentials = Credentials(deviceIdentity: stored.deviceIdentity,
+                                      password: regeneratePassword ? newPassword() : stored.password)
         } else {
-            credentials = Credentials(deviceIdentity: deviceIdentity(for: UUID()),
-                                      password: (0..<8).map { _ in String(Int.random(in: 0...9)) }.joined())
+            credentials = Credentials(deviceIdentity: deviceIdentity(for: UUID()), password: newPassword())
         }
         let request = makeRequest(credentials: credentials, environment: environment)
         // Check the real codec's field/encoding constraints before persistence.
@@ -120,6 +122,10 @@ enum MacRegistrationProfile {
         return request
     }
 
+    private static func newPassword() -> String {
+        (0..<8).map { _ in String(Int.random(in: 0...9)) }.joined()
+    }
+
     static func deviceIdentity(for installationUUID: UUID) -> String {
         var bytes = installationUUID.uuid
         let digest = withUnsafeBytes(of: &bytes) { Insecure.MD5.hash(data: Data($0)) }
@@ -130,6 +136,30 @@ enum MacRegistrationProfile {
         // Actual Mac product patch/major/minor map to .NET Build/Major/Minor.
         // Revision and its two halves have no Mac counterpart and remain zero.
         "\(version.patchVersion)|\(version.majorVersion)|0|\(version.minorVersion)|0|0"
+    }
+
+    /// User-chosen name for this Mac, shown to partners. Empty means the default.
+    static let displayNameKey = "MacViewer.displayName"
+    static let defaultDisplayName = "MacViewer"
+
+    static func customDisplayName(defaults: UserDefaults = .standard) -> String? {
+        let name = (defaults.string(forKey: displayNameKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : String(name.prefix(64))
+    }
+
+    /// The name sent in a partner login, which accepts only ASCII and keeps 20
+    /// characters after removing the native helper's reserved characters.
+    static func loginDisplayName(defaults: UserDefaults = .standard) -> String {
+        let name = loginWireName(customDisplayName(defaults: defaults) ?? "")
+        return name.isEmpty ? defaultDisplayName : name
+    }
+
+    static func loginWireName(_ name: String) -> String {
+        let reserved = Set("!#$&?:/\\*,.@<>;'\"=")
+        let folded = name.replacingOccurrences(of: "đ", with: "d").replacingOccurrences(of: "Đ", with: "D")
+            .folding(options: .diacriticInsensitive, locale: nil)
+        let ascii = folded.filter { $0.isASCII && !reserved.contains($0) && $0.unicodeScalars.allSatisfy({ (32...126).contains($0.value) }) }
+        return String(ascii.trimmingCharacters(in: .whitespaces).prefix(20)).trimmingCharacters(in: .whitespaces)
     }
 
     static func userNameWireValue(_ name: String) -> String {

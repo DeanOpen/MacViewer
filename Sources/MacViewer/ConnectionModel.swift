@@ -35,6 +35,7 @@ final class ConnectionModel: ObservableObject {
     static let rememberPasswordKey = "MacViewer.rememberPassword"
     static let computerAudioKey = "MacViewer.computerAudio"
     private static let recentPartnersKey = "MacViewer.recentPartners"
+    private static let partnerNamesKey = "MacViewer.partnerNames"
 
     @Published var partnerID = "" {
         didSet {
@@ -53,6 +54,8 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var displayedFrame: RemoteScreenFrame?
     @Published private(set) var selectedMonitor = 0
     @Published private(set) var recentPartners: [String]
+    /// Local nicknames for partner IDs; never sent to the other computer.
+    @Published private(set) var partnerNames: [String: String]
     @Published private(set) var controlEnabled = false
     @Published private(set) var computerAudioEnabled = false
     @Published private(set) var isChangingAudio = false
@@ -91,6 +94,7 @@ final class ConnectionModel: ObservableObject {
         recentPartners = defaults.bool(forKey: Self.rememberPartnersKey)
             ? Array((defaults.stringArray(forKey: Self.recentPartnersKey) ?? []).prefix(10))
             : []
+        partnerNames = defaults.dictionary(forKey: Self.partnerNamesKey) as? [String: String] ?? [:]
         self.audioPlayer.onPlaybackError = { [weak self] error in self?.audioPlaybackFailed(error) }
     }
 
@@ -410,11 +414,25 @@ final class ConnectionModel: ObservableObject {
     func removeRecent(_ identifier: String) {
         recentPartners.removeAll { $0 == identifier }
         defaults.set(recentPartners, forKey: Self.recentPartnersKey)
+        renamePartner(identifier, to: "")
     }
 
     func clearRecentPartners() {
         recentPartners = []
         defaults.removeObject(forKey: Self.recentPartnersKey)
+        partnerNames = [:]
+        defaults.removeObject(forKey: Self.partnerNamesKey)
+    }
+
+    func partnerName(_ identifier: String) -> String? {
+        partnerNames[Self.normalizeID(identifier)]
+    }
+
+    /// An empty name removes the nickname.
+    func renamePartner(_ identifier: String, to name: String) {
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(50))
+        partnerNames[Self.normalizeID(identifier)] = trimmed.isEmpty ? nil : trimmed
+        defaults.set(partnerNames, forKey: Self.partnerNamesKey)
     }
 
     private func receive(_ event: RemoteSessionEvent) {
@@ -452,7 +470,16 @@ final class ConnectionModel: ObservableObject {
             }, sendTyping: { [weak self] typing in
                 guard let self, generation == token, phase == .connected else { throw CancellationError() }
                 try await adapter.sendTyping(typing)
-            })
+            }, files: SessionFileActions(send: { [weak self] url in
+                guard let self, generation == token, phase == .connected else { throw CancellationError() }
+                return try await adapter.sendFile(url)
+            }, accept: { [weak self] id, destination in
+                guard let self, generation == token, phase == .connected else { throw CancellationError() }
+                try await adapter.acceptFile(id, to: destination)
+            }, cancel: { [weak self] id in
+                guard let self, generation == token else { return }
+                try await adapter.cancelFile(id)
+            }))
         case let .frame(newFrame):
             guard phase == .connected else { return }
             frame = newFrame
@@ -482,6 +509,10 @@ final class ConnectionModel: ObservableObject {
             }
         case let .disconnected(reason):
             endSession(message: reason ?? "The remote computer disconnected.")
+        case let .fileOffer(id, name, size): tools.receiveFileOffer(id: id, name: name, size: size)
+        case let .fileProgress(id, bytes): tools.fileProgress(id, bytes: bytes)
+        case let .fileCompleted(id): tools.fileCompleted(id)
+        case let .fileCanceled(id): tools.fileCanceled(id)
         case let .chat(text): tools.receiveChat(text)
         case let .typing(typing): tools.receiveTyping(typing)
         case let .clipboard(text): tools.receiveClipboard(text)
