@@ -316,7 +316,6 @@ final class ConnectionModel: ObservableObject {
                 computerAudioEnabled = false
                 errorMessage = "Computer audio stopped: \(error.localizedDescription)"
                 if wanted {
-                    // Forget the choice so a failing enable is not replayed on every connect.
                     defaults.set(false, forKey: Self.computerAudioKey)
                     // One serialized disable after a failed enable also covers
                     // a local output-device failure after the wire enable sent.

@@ -156,8 +156,7 @@ public actor FramedTCPTransport {
             let continuation = opening
             opening = nil
             continuation?.resume()
-        // A rejected certificate parks the connection in .waiting and retries
-        // forever; fail now instead of reporting a misleading timeout.
+        // A rejected certificate otherwise waits silently until the timeout.
         case .waiting(.tls), .failed(.tls):
             finish(Error.untrustedRelayCertificate)
         case let .failed(error): finish(error)

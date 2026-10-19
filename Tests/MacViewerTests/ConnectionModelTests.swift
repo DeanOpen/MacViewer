@@ -491,7 +491,6 @@ struct ConnectionModelTests {
 
     @Test("Saved volumes snap to a picker option and are applied without waiting for audio")
     func audioVolumeLevels() async throws {
-        #expect(RemoteAudioPlayer.volumeLevel(nil) == 1)
         #expect(RemoteAudioPlayer.volumeLevel(0) == 0.25)
         #expect(RemoteAudioPlayer.volumeLevel(0.3) == 0.25)
         #expect(RemoteAudioPlayer.volumeLevel(0.7) == 0.75)

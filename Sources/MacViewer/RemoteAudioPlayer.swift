@@ -38,10 +38,8 @@ final class RemoteAudioPlayer {
     /// Report asynchronous output-device restart failures to the session UI.
     var onPlaybackError: ((Swift.Error) -> Void)?
 
-    /// Snaps a stored volume to a picker option so the picker and playback agree.
-    static func volumeLevel(_ stored: Double?) -> Double {
-        guard let stored else { return 1 }
-        return volumeLevels.min { abs($0 - stored) < abs($1 - stored) }!
+    static func volumeLevel(_ stored: Double) -> Double {
+        volumeLevels.min { abs($0 - stored) < abs($1 - stored) }!
     }
 
     var volume: Float { player.volume }
@@ -144,7 +142,7 @@ final class RemoteAudioPlayer {
     }
 
     private func applyVolume() {
-        player.volume = Float(Self.volumeLevel(defaults.object(forKey: Self.volumeKey) as? Double))
+        player.volume = Float(Self.volumeLevel(defaults.object(forKey: Self.volumeKey) as? Double ?? 1))
     }
 
     private func discardQueuedAudio() {
