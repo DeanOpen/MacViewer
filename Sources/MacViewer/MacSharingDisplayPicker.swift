@@ -6,7 +6,7 @@ struct MacSharingDisplayPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Picker("Share display", selection: Binding(get: { hosting.selectedDisplayKey }, set: hosting.selectDisplay)) {
+            Picker("Share display", selection: Binding(get: { hosting.selectedDisplayKey }, set: { hosting.selectDisplay($0) })) {
                 Text("All displays").tag(MacDisplayLayout.allDisplaysKey)
                 if hosting.selectedDisplayKey != MacDisplayLayout.allDisplaysKey,
                    !hosting.displays.contains(where: { $0.key == hosting.selectedDisplayKey }) {
