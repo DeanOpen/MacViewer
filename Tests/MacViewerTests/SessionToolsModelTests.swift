@@ -65,6 +65,31 @@ struct SessionToolsModelTests {
         model.deactivate()
     }
 
+    @Test("The sharing-is-off hint shows until the user turns sharing on or hides it, and returns next session")
+    func clipboardHint() async throws {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let suite = "SessionToolsModelTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = SessionToolsModel(pasteboard: board, defaults: defaults)
+        #expect(!model.showsClipboardHint)
+        model.activate(sendChat: { _ in }, sendClipboard: { _ in }, setSharing: { _ in })
+        #expect(model.showsClipboardHint)
+        model.dismissClipboardHint()
+        #expect(!model.showsClipboardHint)
+        model.activate(sendChat: { _ in }, sendClipboard: { _ in }, setSharing: { _ in })
+        #expect(model.showsClipboardHint)
+        model.setClipboardEnabled(true)
+        for _ in 0..<100 where !model.clipboardEnabled { await Task.yield() }
+        #expect(model.clipboardEnabled && !model.showsClipboardHint)
+        model.setClipboardEnabled(false)
+        for _ in 0..<100 where model.isUpdatingClipboard { await Task.yield() }
+        #expect(!model.clipboardEnabled && !model.showsClipboardHint)
+        model.deactivate()
+        #expect(!model.showsClipboardHint)
+    }
+
     @Test("When turned on in Settings, sharing starts with the session without sending existing contents")
     func clipboardOnFromSettings() async throws {
         let board = NSPasteboard.withUniqueName()

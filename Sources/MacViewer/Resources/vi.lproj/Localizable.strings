@@ -495,3 +495,6 @@
 "New Password" = "Mật khẩu mới";
 "The old password stops working. Your Mac’s ID stays the same." = "Mật khẩu cũ sẽ không dùng được nữa. ID của máy Mac giữ nguyên.";
 "A new password could not be created: %@" = "Không tạo được mật khẩu mới: %@";
+"Clipboard off" = "Bảng nhớ tạm: tắt";
+"Turn On" = "Bật";
+"Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Đang tắt chia sẻ bảng nhớ tạm. Chữ copy ở máy này sẽ không dán được ở máy kia.";

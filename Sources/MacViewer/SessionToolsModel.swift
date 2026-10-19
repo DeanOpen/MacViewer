@@ -40,6 +40,8 @@ final class SessionToolsModel: ObservableObject {
     @Published private(set) var isUpdatingClipboard = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var clipboardStatus = "Clipboard sharing is off."
+    /// Set once the user turns sharing on or off, or hides the hint, for this session.
+    @Published private(set) var clipboardHintDismissed = false
     /// Newest first, at most 20 items; cleared when the session ends.
     @Published private(set) var clipboardHistory: [SessionClipboardEntry] = []
     /// Short-lived notice after text is shared ("Copied from…", "Sent to…").
@@ -109,7 +111,7 @@ final class SessionToolsModel: ObservableObject {
         isActive = false; isSending = false; clipboardEnabled = false; isUpdatingClipboard = false
         latestClipboardText = nil
         clipboardStatus = "Clipboard sharing is off."
-        clipboardHistory = []
+        clipboardHistory = []; clipboardHintDismissed = false
         noticeTask?.cancel(); noticeTask = nil; clipboardNotice = nil
     }
 
@@ -189,8 +191,17 @@ final class SessionToolsModel: ObservableObject {
         }
     }
 
+    /// Sharing is off by default, so remind the user how to turn it on until
+    /// they choose either way.
+    var showsClipboardHint: Bool {
+        isActive && !clipboardEnabled && !isUpdatingClipboard && !clipboardHintDismissed
+    }
+
+    func dismissClipboardHint() { clipboardHintDismissed = true }
+
     func setClipboardEnabled(_ enabled: Bool) {
         guard isActive, let setSharing else { return }
+        clipboardHintDismissed = true
         let token = generation, revision = UUID()
         clipboardGeneration = revision
         clipboardSetup?.cancel(); clipboardTask?.cancel(); clipboardTask = nil

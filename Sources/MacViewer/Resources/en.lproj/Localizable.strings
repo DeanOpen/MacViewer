@@ -495,3 +495,6 @@
 "New Password" = "New Password";
 "The old password stops working. Your Mac’s ID stays the same." = "The old password stops working. Your Mac’s ID stays the same.";
 "A new password could not be created: %@" = "A new password could not be created: %@";
+"Clipboard off" = "Clipboard off";
+"Turn On" = "Turn On";
+"Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Clipboard sharing is off. Text copied on one computer can't be pasted on the other.";

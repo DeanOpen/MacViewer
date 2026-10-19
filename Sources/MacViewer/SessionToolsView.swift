@@ -64,6 +64,7 @@ struct SessionToolsView: View {
             Text("Chat history").font(.system(size: 10)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 9).padding(.vertical, 5)
+            if tools.showsClipboardHint { clipboardHint }
             transcript
             if tools.peerIsTyping {
                 Text(LF("%@ is typing…", peerName)).font(.system(size: 10)).foregroundStyle(.secondary)
@@ -106,6 +107,23 @@ struct SessionToolsView: View {
             }
             return true
         }
+    }
+
+    private var clipboardHint: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.on.clipboard").foregroundStyle(.secondary)
+            Text("Clipboard sharing is off. Text copied on one computer can't be pasted on the other.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Turn On") { tools.setClipboardEnabled(true) }
+                .buttonStyle(.bordered).controlSize(.mini)
+            Button { tools.dismissClipboardHint() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).controlSize(.mini)
+                .help("Hide").accessibilityLabel("Hide")
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(.quaternary.opacity(0.5))
     }
 
     @ViewBuilder private var draftField: some View {
@@ -223,7 +241,7 @@ struct SessionClipboardButton: View {
             HStack(spacing: 4) {
                 Image(systemName: tools.clipboardEnabled ? "doc.on.clipboard.fill" : "doc.on.clipboard")
                     .foregroundStyle(tools.clipboardEnabled ? .green : .secondary)
-                Text(LocalizedStringKey(tools.clipboardNotice ?? "Clipboard"))
+                Text(LocalizedStringKey(tools.clipboardNotice ?? (tools.showsClipboardHint ? "Clipboard off" : "Clipboard")))
                     .foregroundStyle(tools.clipboardNotice == nil ? .primary : Color.green)
                     .lineLimit(1)
             }
