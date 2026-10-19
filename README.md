@@ -10,7 +10,7 @@
 
 ### [Tải về MacViewer cho macOS](https://github.com/DeanOpen/MacViewer/releases/latest)
 
-Bản mới nhất, macOS 14 trở lên
+Bản mới nhất, macOS 12 trở lên
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -60,22 +60,25 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 ### Cho người khác truy cập máy Mac
 
 - Người khác chỉ xem hoặc điều khiển được sau khi bạn bấm đồng ý trên máy Mac
+- Chọn một màn hình Mac hoặc **Tất cả màn hình** trước và trong khi kết nối.
+  Khi chia sẻ tất cả, người dùng Windows có thể chọn xem từng màn hình hoặc
+  toàn bộ màn hình qua menu màn hình của UltraViewer
 - Có hướng dẫn từng bước để bật quyền **Ghi màn hình** và **Trợ năng**
 - Quyền xem và quyền điều khiển được duyệt riêng. Bạn có thể ngắt kết nối hoặc
   tạm khóa truy cập bất cứ lúc nào
 - Sao chép hoặc **tạo mật khẩu mới** cho máy Mac; ID giữ nguyên
 - Đặt **tên hiển thị** cho máy Mac trong Cài đặt (chữ không dấu, tối đa 20 ký tự)
+- Gửi và nhận file trong chat của phiên truy cập vào Mac, có nút lưu, hủy và
+  tiến trình truyền như khi Mac điều khiển máy khác
 
 ### Khác
 
 - Giao diện tiếng Việt và tiếng Anh, hoặc tự theo ngôn ngữ của máy
-- Chạy trên cả chip Apple (M1, M2…) và Intel, yêu cầu macOS 14 Sonoma trở lên
+- Chạy trên cả chip Apple (M1, M2…) và Intel, yêu cầu macOS 12 Monterey trở lên
 
 ### Chưa hỗ trợ
 
-Gửi file khi máy Windows điều khiển máy Mac, nói chuyện qua micro, phát âm
-thanh khi chia sẻ máy Mac, chia sẻ
-nhiều màn hình Mac cùng lúc và truy cập không cần người ngồi máy. Chưa thử
+Nói chuyện qua micro, phát âm thanh khi chia sẻ máy Mac và truy cập không cần người ngồi máy. Chưa thử
 nghiệm với các bản UltraViewer cũ, bàn phím không phải kiểu US, bộ gõ ngoài
 tiếng Việt và tiếng Trung, và chế độ màu 8-bit.
 
@@ -123,6 +126,19 @@ Gửi ID và mật khẩu của máy Mac cho người kia, rồi bấm đồng �
 kết nối. Nếu macOS yêu cầu, hãy tắt và mở lại MacViewer sau khi bật quyền Ghi
 màn hình.
 
+Trong mục **Màn hình chia sẻ**, chọn một màn hình hoặc **Tất cả màn hình**.
+Khi chia sẻ tất cả, dùng menu màn hình của UltraViewer trên Windows để xem
+từng màn hình hoặc toàn bộ màn hình. Lựa chọn được ghi nhớ trên máy Mac.
+Nếu màn hình đã chọn bị ngắt kết nối, phiên chia sẻ dừng thay vì tự chuyển
+sang một màn hình khác.
+
+Chat và truyền file hoạt động ở cả hai chiều kết nối. File đến chỉ được lưu
+sau khi bấm **Lưu** và không ghi đè file có sẵn. Trường tên file của UltraViewer
+gốc dùng bảng mã ANSI trên Windows nhưng không báo bảng mã cho bên nhận.
+Khi Mac chia sẻ, tên có dấu được đổi sang tên ASCII tương ứng; khi nhận trường
+tên cũ này, MacViewer thử UTF-8 rồi Windows-1252. Nội dung file vẫn được truyền
+dưới dạng nhị phân.
+
 ## Dùng với trợ lý AI (MCP)
 
 MacViewer có sẵn MCP server. Nhờ đó các ứng dụng AI và trợ lý lập trình có thể
@@ -156,7 +172,7 @@ claude mcp add --scope user macviewer -- /Applications/MacViewer.app/Contents/Ma
 
 ## Build từ mã nguồn
 
-Cần macOS 14 trở lên và Xcode 16 / Swift 6 trở lên.
+Chạy trên macOS 12 trở lên; build cần macOS 14 trở lên và Xcode 16 / Swift 6 trở lên.
 
 ```sh
 git clone https://github.com/DeanOpen/MacViewer.git

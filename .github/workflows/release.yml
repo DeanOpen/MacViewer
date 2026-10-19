@@ -164,7 +164,7 @@ jobs:
             echo
             echo "## Install"
             echo "1. Download **MacViewer.dmg**, open it and drag MacViewer into Applications."
-            echo "2. Requires macOS 14 or later (Apple silicon and Intel)."
+            echo "2. Requires macOS 12 or later (Apple silicon and Intel)."
             echo "3. Already installed? MacViewer offers the update itself and restarts when it's done."
           } > "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md"

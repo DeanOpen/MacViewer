@@ -31,8 +31,8 @@ struct SessionToolsButton: View {
         .disabled(!tools.isActive)
         .help("Chat with \(peerName)")
         .onAppear(perform: register)
-        .onChange(of: tools.isActive) { _, _ in register() }
-        .onChange(of: peerName) { _, _ in register() }
+        .onChange(of: tools.isActive) { _ in register() }
+        .onChange(of: peerName) { _ in register() }
     }
 
     private func register() {
@@ -80,11 +80,11 @@ struct SessionToolsView: View {
                 Button(action: chooseFiles) { Image(systemName: "paperclip") }
                     .buttonStyle(.borderless).disabled(!tools.canTransferFiles)
                     .help("Send a file")
-                TextField("Message", text: $tools.draft, axis: .vertical)
-                    .font(.system(size: 12)).lineLimit(1...3).textFieldStyle(.roundedBorder)
+                draftField
+                    .font(.system(size: 12)).textFieldStyle(.roundedBorder)
                     .focused($draftFocused).disabled(!tools.isActive)
                     .onSubmit { if canSend { tools.sendDraft() } }
-                    .onChange(of: tools.draft) { _, _ in tools.draftChanged() }
+                    .onChange(of: tools.draft) { _ in tools.draftChanged() }
                 Button("Send", action: tools.sendDraft)
                     .buttonStyle(.bordered).controlSize(.small).disabled(!canSend)
                     .keyboardShortcut(.return, modifiers: .command)
@@ -95,11 +95,24 @@ struct SessionToolsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { draftFocused = tools.isActive }
         // Drop files anywhere on the chat to send them.
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter(\.isFileURL)
-            guard tools.canTransferFiles, !files.isEmpty else { return false }
-            tools.sendFiles(files)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard tools.canTransferFiles, !providers.isEmpty else { return false }
+            let tools = tools
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    Task { @MainActor in if tools.canTransferFiles { tools.sendFiles([url]) } }
+                }
+            }
             return true
+        }
+    }
+
+    @ViewBuilder private var draftField: some View {
+        if #available(macOS 13, *) {
+            TextField("Message", text: $tools.draft, axis: .vertical).lineLimit(1...3)
+        } else {
+            TextField("Message", text: $tools.draft)
         }
     }
 
@@ -133,7 +146,7 @@ struct SessionToolsView: View {
             .onAppear {
                 if let id = tools.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
             }
-            .onChange(of: tools.messages.last?.id) { _, id in
+            .onChange(of: tools.messages.last?.id) { id in
                 if let id { proxy.scrollTo(id, anchor: .bottom) }
             }
         }

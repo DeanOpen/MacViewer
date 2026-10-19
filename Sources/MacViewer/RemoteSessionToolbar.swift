@@ -197,7 +197,7 @@ struct RemoteSessionToolbar: View {
                 Picker("Image quality", selection: $imageQuality) {
                     ForEach(RemoteImageQuality.allCases) { quality in Text(LocalizedStringKey(quality.title)).tag(quality) }
                 }
-                .onChange(of: imageQuality) { _, quality in
+                .onChange(of: imageQuality) { quality in
                     if quality == .custom { callbacks.releaseInput(); showCustomQuality = true }
                     else { setQuality(quality) }
                 }
@@ -209,7 +209,7 @@ struct RemoteSessionToolbar: View {
             Label("Configuration", systemImage: "gearshape")
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .onChange(of: displayScale) { _, _ in callbacks.releaseInput() }
+        .onChange(of: displayScale) { _ in callbacks.releaseInput() }
     }
 
     private var captureMenu: some View {

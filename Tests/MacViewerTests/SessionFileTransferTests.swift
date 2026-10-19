@@ -37,3 +37,32 @@ struct SessionFileTransferTests {
         #expect(tools.transfers["30121899000000000002"]?.state == .failed("The connection ended."))
     }
 }
+
+@MainActor
+@Test func incomingFileNamesCannotEscapeTheChosenFolder() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MacViewer-file-names-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    for name in ["..", ".", "../../outside", "C:\\Windows\\file.txt", "a\0b", "a\nb", "", String(repeating: "ệ", count: 200)] {
+        let destination = ReceivedFilesFolder.uniqueURL(for: name, in: folder)
+        #expect(destination.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL)
+        #expect(!destination.lastPathComponent.isEmpty)
+        #expect(destination.lastPathComponent.utf8.count <= 240)
+    }
+}
+
+@MainActor
+@Test func aFileAcceptedBeforeSendReturnsKeepsItsFinalUIState() async {
+    let tools = SessionToolsModel(pasteboard: .withUniqueName(), defaults: UserDefaults(suiteName: UUID().uuidString)!)
+    tools.activate(sendChat: { _ in }, sendClipboard: { _ in }, setSharing: { _ in },
+        files: SessionFileActions(send: { _ in
+            tools.fileProgress("123", bytes: 12)
+            tools.fileCompleted("123")
+            tools.fileProgress("123", bytes: 0)
+            return "123"
+        }, accept: { _, _ in }, cancel: { _ in }))
+    tools.sendFiles([URL(fileURLWithPath: "/tmp/source.txt")])
+    for _ in 0..<100 where tools.transfers["123"] == nil { await Task.yield() }
+    #expect(tools.transfers["123"]?.state == .completed)
+    tools.deactivate()
+}

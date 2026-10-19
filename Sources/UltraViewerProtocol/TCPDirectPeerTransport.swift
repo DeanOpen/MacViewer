@@ -76,7 +76,7 @@ public actor TCPDirectPeerTransport {
     }
 
     public func startListener(localAddress: RelayIPv4Address, encryptionKey: String,
-                              timeout: Duration = .seconds(3)) async throws
+                              timeout: TimeInterval = 3) async throws
         -> (advertisement: Advertisement, stream: AsyncThrowingStream<Event, any Swift.Error>) {
         try Task.checkCancellation()
         guard listener == nil, events == nil else { throw Error.alreadyOpen }
@@ -108,7 +108,7 @@ public actor TCPDirectPeerTransport {
                         Task { await self?.listenerChanged(state, token: token) }
                     }
                     deadline = Task { [weak self] in
-                        do { try await Task.sleep(for: timeout); await self?.listenerExpired(token) }
+                        do { try await Task.sleep(seconds: timeout); await self?.listenerExpired(token) }
                         catch {}
                     }
                     server.start(queue: queue)
@@ -191,7 +191,7 @@ public actor TCPDirectPeerTransport {
             Task { await self?.clientChanged(state, id: id, token: token) }
         }
         clients[id]?.deadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(3)); await self?.clientExpired(id, token: token) }
+            do { try await Task.sleep(seconds: 3); await self?.clientExpired(id, token: token) }
             catch {}
         }
         connection.start(queue: queue)

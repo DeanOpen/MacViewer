@@ -53,12 +53,12 @@ final class UpdateChecker: ObservableObject {
     }
 
     /// Checks at launch and every few hours while running, unless turned off in Settings.
-    func startAutomaticChecks(every interval: Duration = .seconds(4 * 60 * 60)) {
+    func startAutomaticChecks(every interval: TimeInterval = 4 * 60 * 60) {
         guard automaticTask == nil else { return }
         automaticTask = Task {
             while !Task.isCancelled {
                 checkAutomatically()
-                try? await Task.sleep(for: interval)
+                try? await Task.sleep(seconds: interval)
             }
         }
     }
@@ -124,7 +124,7 @@ final class UpdateChecker: ObservableObject {
                 // main-actor job: AppKit waits on the main thread for the
                 // delegate's async reply, which would otherwise deadlock.
                 showSheet = false
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(seconds: 0.5)
                 NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
             } catch {
                 state = .available(release)

@@ -44,3 +44,57 @@ private func utf16(_ text: String) -> Data {
     let payload = FileTransferOffer.viewerChunk(transferID: "30121899014729763011", offset: 32_001, data: data)
     #expect(payload == Data("15|||30121899014729763011|||32001|||".utf8) + data)
 }
+
+@Test func fileOffersAndOffsetsRejectFractionalNonFiniteAndInvalidFields() {
+    let id = Data("123".utf8), name = Data("a.txt".utf8)
+    for invalid in [Double.nan, .infinity, -1, 1.5, Double(FileTransferOffer.maximumFileSize) + 1] {
+        #expect(FileTransferOffer.decode(parts: [Data([13, 0]), id, name, doubleBytes(invalid)]) == nil)
+        #expect(FileTransferOffer.decodeChunk(parts: [Data([15, 0]), id, doubleBytes(invalid), Data([1])]) == nil)
+    }
+    #expect(FileTransferOffer.decode(parts: [Data([13, 9]), id, name, doubleBytes(1)]) == nil)
+    #expect(FileTransferOffer.decode(parts: [Data([13, 0]), Data("a|||b".utf8), name, doubleBytes(1)]) == nil)
+    #expect(FileTransferOffer.decode(parts: [Data([13, 0]), id, Data([0xff]), doubleBytes(1)]) != nil) // Legacy ANSI fallback.
+    #expect(FileTransferOffer.decode(parts: [Data([13, 0]), id, Data("a\0b".utf8), doubleBytes(1)]) == nil)
+    #expect(FileTransferOffer.decode(parts: [Data([13, 0]), id, Data("a|||b".utf8), doubleBytes(1)]) == nil)
+}
+
+@Test func windowsViewerFileChunksPreserveAllBytesAfterOnlyThreeHeaderDelimiters() throws {
+    let raw = Data([0xff, 0, 13, 10]) + Data("|||tail|||".utf8)
+    let message = try #require(FileTransferMessage.decodeViewerPayload(Data("15|||123|||32001|||".utf8) + raw))
+    #expect(message == .chunk(id: "123", offset: 32_001, data: raw))
+    for invalid in ["15|||123|||0|||", "15|||123|||1.5|||", "15|||123|||-1|||", "15|||123|||NaN|||"] {
+        #expect(FileTransferMessage.decodeViewerPayload(Data(invalid.utf8) + raw) == nil)
+    }
+}
+
+@Test func windowsViewerOffersUseUnicodeAndStrictCommandFieldCounts() throws {
+    let text = "13|||123|||Báo cáo 日本語 😀.txt|||12345"
+    let normalized = try HostRelayMessages.peerPayload(utf16(text), unicode: true)
+    #expect(FileTransferMessage.decodeViewerPayload(normalized) == .offer(FileTransferOffer(transferID: "123", fileName: "Báo cáo 日本語 😀.txt", size: 12_345)))
+    #expect(FileTransferMessage.decodeViewerPayload(Data("13|||123|||x|||1|||extra".utf8)) == nil)
+    #expect(FileTransferMessage.decodeViewerPayload(Data("14|||123|||1".utf8)) == .accept(id: "123", offset: 1))
+    #expect(FileTransferMessage.decodeViewerPayload(Data("14|||123|||2".utf8)) == nil)
+    #expect(FileTransferMessage.decodeViewerPayload(Data("21|||123|||extra".utf8)) == nil)
+}
+
+@Test func nativeHostFileNamesUsePortableASCIIForTheUnnegotiatedANSIField() throws {
+    let offer = FileTransferOffer(transferID: "123", fileName: "Báo cáo Đà Nẵng 😀.txt", size: 3)
+    let parts = try MultipartPayload.decode(offer.hostToViewer())
+    #expect(parts[0] == Data([13, 0]))
+    #expect(parts[2] == Data("Bao cao Da Nang _.txt".utf8))
+    let cafe = try #require(FileTransferOffer.decode(parts: [Data([13, 0]), Data("123".utf8), Data([0x63, 0x61, 0x66, 0xe9]), doubleBytes(3)]))
+    #expect(cafe.fileName == "café")
+}
+
+@Test func nativeHostLegacyChunkOffsetsAreStrictPositiveInt32LE() throws {
+    let base = [Data([15, 0]), Data("123".utf8)]
+    let legacy = try #require(FileTransferOffer.decodeChunk(parts: base + [Data([1, 0x7d, 0, 0]), Data([1])]))
+    #expect(legacy.offset == 32_001)
+    #expect(FileTransferOffer.decodeChunk(parts: base + [Data([0, 0, 0, 0]), Data([1])]) == nil)
+    #expect(FileTransferOffer.decodeChunk(parts: base + [Data([0xff, 0xff, 0xff, 0xff]), Data([1])]) == nil)
+}
+
+@Test func legacyANSIFileNamesThatCoincideWithValidUTF8AreNotReinterpreted() throws {
+    let offer = try #require(FileTransferOffer.decode(parts: [Data([13, 0]), Data("123".utf8), Data([0xc3, 0xa9]), doubleBytes(1)]))
+    #expect(offer.fileName == "Ã©")
+}

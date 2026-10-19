@@ -128,7 +128,7 @@ final class RemoteCaptureController: ObservableObject {
                     self.isRecording = true
                     self.recordingClock = Task { @MainActor [weak self] in
                         while !Task.isCancelled {
-                            try? await Task.sleep(for: .seconds(1))
+                            try? await Task.sleep(seconds: 1)
                             guard !Task.isCancelled, let self, self.isRecording,
                                   self.recordingRequest == request else { return }
                             self.recordingSeconds = Int(ProcessInfo.processInfo.systemUptime - self.recordingStarted)

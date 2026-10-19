@@ -30,6 +30,11 @@ public actor UltraViewerHostSession {
         case captureRequested(UUID), input(session: UUID, payload: Data), releaseInput, viewerEnded(String?)
         case chat(session: UUID, text: String), typing(session: UUID, active: Bool)
         case clipboard(session: UUID, text: String)
+        case fileOffer(session: UUID, offer: FileTransferOffer)
+        case fileProgress(session: UUID, transferID: String, bytes: Int64)
+        case fileCompleted(session: UUID, transferID: String)
+        case fileCanceled(session: UUID, transferID: String)
+        case fileFailed(session: UUID, transferID: String, reason: String)
         case sideSwitchRequested(session: UUID, request: SideSwitchApproval)
     }
     public struct Diagnostics: Encodable, Sendable {
@@ -103,8 +108,13 @@ public actor UltraViewerHostSession {
     private var events: AsyncThrowingStream<Event, any Swift.Error>.Continuation?
     private var peer: Peer?
     private var peerPhase = PeerPhase.none
+    private var sessionToolsGate = HostedSessionToolsGate()
     private var controlAllowed = false
     private var clipboardAllowed = false
+    private var files = FileTransferEngine()
+    private var fileOutbox: [FileTransferMessage] = []
+    private var fileSending = false
+    private var fileSendRevision = UUID()
     private var sideSwitch = HostSideSwitchApprovalGate()
     private var pendingFrame: HostedScreenFrame?
     private var lastFrame: HostedScreenFrame?
@@ -155,7 +165,7 @@ public actor UltraViewerHostSession {
     public func submitFrame(_ frame: HostedScreenFrame, ticket: UUID) async throws {
         guard peerPhase == .streaming, captureTicket == ticket else { return }
         captureTicket = nil
-        if let previous = lastFrame, previous.width == frame.width, previous.height == frame.height,
+        if let previous = lastFrame, previous.hasSameLayout(as: frame),
            previous.rgb555BottomUp == frame.rgb555BottomUp {
             scheduleCapture()
             return
@@ -175,26 +185,78 @@ public actor UltraViewerHostSession {
     }
 
     public func sendChat(_ text: String, session: UUID) async throws {
-        guard peerPhase == .streaming, let peer, peer.request.id == session else { throw Failure.notConnected }
+        guard canUseSessionTools(session), let peer else { throw Failure.notConnected }
         try await send(ChatProtocol.hostToViewer(text: text), route: peer.route)
         diagnostics.chatMessagesSent += 1
     }
 
     public func sendTyping(_ typing: Bool, session: UUID) async throws {
-        guard peerPhase == .streaming, let peer, peer.request.id == session else { throw Failure.notConnected }
+        guard canUseSessionTools(session), let peer else { throw Failure.notConnected }
         try await send(ChatProtocol.hostToViewerTyping(typing), route: peer.route)
     }
 
     public func setClipboardSharing(_ enabled: Bool, session: UUID) throws {
-        guard peerPhase == .streaming, peer?.request.id == session else { throw Failure.notConnected }
+        guard canUseSessionTools(session) else { throw Failure.notConnected }
         clipboardAllowed = enabled
     }
 
     public func sendClipboard(_ text: String, session: UUID) async throws {
-        guard peerPhase == .streaming, clipboardAllowed, let peer,
-              peer.request.id == session else { throw Failure.notConnected }
+        guard canUseSessionTools(session), clipboardAllowed, let peer else { throw Failure.notConnected }
         try await send(ClipboardProtocol.hostToViewer(text), route: peer.route)
         diagnostics.clipboardMessagesSent += 1
+    }
+
+    /// File transfer is scoped to the currently approved viewing session.
+    public func sendFile(_ url: URL, session: UUID) async throws -> FileTransferOffer {
+        guard canUseSessionTools(session) else { throw Failure.notConnected }
+        let (offer, update) = try files.offerFile(url)
+        do { try await applyFileUpdate(update, session: session) }
+        catch { _ = files.cancel(offer.transferID); throw error }
+        return offer
+    }
+
+    public func acceptFile(_ transferID: String, to destination: URL, session: UUID) async throws {
+        guard canUseSessionTools(session) else { throw Failure.notConnected }
+        let update = try files.accept(transferID, to: destination)
+        do { try await applyFileUpdate(update, session: session) }
+        catch { _ = files.cancel(transferID); throw error }
+    }
+
+    public func cancelFile(_ transferID: String, session: UUID) async throws {
+        guard canUseSessionTools(session) else { throw Failure.notConnected }
+        try await applyFileUpdate(files.cancel(transferID), session: session)
+    }
+
+    private func canUseSessionTools(_ session: UUID) -> Bool {
+        (peerPhase == .starting || peerPhase == .streaming)
+            && peer?.request.id == session && sessionToolsGate.permits(session)
+    }
+
+    private func applyFileUpdate(_ update: FileTransferEngine.Update, session: UUID) async throws {
+        guard canUseSessionTools(session) else { throw Failure.notConnected }
+        for event in update.events {
+            switch event {
+            case let .offer(offer): try emit(.fileOffer(session: session, offer: offer))
+            case let .progress(id, bytes): try emit(.fileProgress(session: session, transferID: id, bytes: bytes))
+            case let .completed(id): try emit(.fileCompleted(session: session, transferID: id))
+            case let .canceled(id):
+                fileOutbox.removeAll { $0.transferID == id }
+                try emit(.fileCanceled(session: session, transferID: id))
+            case let .failed(id, reason):
+                fileOutbox.removeAll { $0.transferID == id }
+                try emit(.fileFailed(session: session, transferID: id, reason: reason))
+            }
+        }
+        fileOutbox.append(contentsOf: update.messages)
+        guard !fileSending else { return }
+        fileSending = true
+        let revision = fileSendRevision
+        defer { if fileSendRevision == revision { fileSending = false } }
+        while canUseSessionTools(session), fileSendRevision == revision,
+              let route = peer?.route, !fileOutbox.isEmpty {
+            let encoded = try fileOutbox.removeFirst().encode(for: .host)
+            try await send(encoded.payload, route: route)
+        }
     }
 
     /// Only the current, locally approved viewer can switch roles. A successful
@@ -239,7 +301,7 @@ public actor UltraViewerHostSession {
             guard running, generation == token else { await transport.close(); return }
             command = transport
             registrationDeadline = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(20)); await self?.registrationExpired(token) } catch {}
+                do { try await Task.sleep(seconds: 20); await self?.registrationExpired(token) } catch {}
             }
             try await transport.send(config.registration.relayEnvelope(cipher: .desktopServerCommands))
             for try await bytes in stream {
@@ -263,7 +325,7 @@ public actor UltraViewerHostSession {
             try emit(.registered(reply.assignedIDText))
             heartbeat = Task { [weak self] in
                 while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(60)); await self?.keepalive(token) } catch { return }
+                    do { try await Task.sleep(seconds: 60); await self?.keepalive(token) } catch { return }
                 }
             }
         } else if (tag == "11" || tag == "17"), diagnostics.registered {
@@ -296,7 +358,7 @@ public actor UltraViewerHostSession {
             relayDeadline?.cancel()
             relayDeadline = Task { [weak self] in
                 do {
-                    try await Task.sleep(for: .seconds(15))
+                    try await Task.sleep(seconds: 15)
                     await self?.relayAddressExpired(token: token, relayToken: relayToken)
                 } catch {}
             }
@@ -377,6 +439,10 @@ public actor UltraViewerHostSession {
             return
         }
         guard let peer, peer.route == route else { diagnostics.rejectedSources += 1; return }
+        if canUseSessionTools(peer.request.id), let message = FileTransferMessage.decodeViewerPayload(payload) {
+            try await applyFileUpdate(files.consume(message), session: peer.request.id)
+            return
+        }
         if payload.starts(with: Data("54|||".utf8)) {
             guard let request = try? RemoteControlCommands.decodeSideSwitchRequest(payload),
                   let approval = sideSwitch.receive(request, session: peer.request.id,
@@ -384,7 +450,7 @@ public actor UltraViewerHostSession {
             try emit(.sideSwitchRequested(session: peer.request.id, request: approval))
             return
         }
-        if peerPhase == .streaming,
+        if canUseSessionTools(peer.request.id),
            payload.starts(with: Data("33|||".utf8)) || payload.starts(with: Data("5|||".utf8)) {
             guard clipboardAllowed,
                   let text = try? ClipboardProtocol.decodeNormalizedViewerToHost(payload) else { return }
@@ -392,7 +458,7 @@ public actor UltraViewerHostSession {
             try emit(.clipboard(session: peer.request.id, text: text))
             return
         }
-        if peerPhase == .streaming, let event = try? ChatProtocol.decodeHostPayload(payload) {
+        if canUseSessionTools(peer.request.id), let event = try? ChatProtocol.decodeHostPayload(payload) {
             switch event {
             case let .message(text):
                 diagnostics.chatMessagesReceived += 1
@@ -405,6 +471,7 @@ public actor UltraViewerHostSession {
             cancelViewerDeadline()
             diagnostics.viewerInitialized = true
             peerPhase = .streaming
+            sessionToolsGate.didConnect(peer.request.id)
             try emit(.connected(peer.request))
             if let frame = pendingFrame { pendingFrame = nil; try await sendFrame(frame) }
             return
@@ -431,7 +498,7 @@ public actor UltraViewerHostSession {
         let token = generation
         let revision = UUID(); initializationID = revision
         let initialization = try HostedScreenMessage.initialization(width: frame.width, height: frame.height,
-                                                                     version: "6.6.133")
+                                                                     version: "6.6.133", monitors: frame.monitors)
         peer = approved; peerPhase = .starting; controlAllowed = control
         sideSwitch.reset()
         controlRevision = UUID()
@@ -458,7 +525,7 @@ public actor UltraViewerHostSession {
 
     private func sendFrame(_ frame: HostedScreenFrame) async throws {
         guard peerPhase == .streaming, !waitingForAck, let peer else { return }
-        if let old = lastFrame, old.width != frame.width || old.height != frame.height {
+        if let old = lastFrame, !old.hasSameLayout(as: frame) {
             try await initialize(peer, frame: frame, control: controlAllowed)
             return
         }
@@ -475,7 +542,7 @@ public actor UltraViewerHostSession {
         captureTimer?.cancel()
         let token = generation
         captureTimer = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(250)); await self?.requestCapture(token: token, session: id) } catch {}
+            do { try await Task.sleep(seconds: 0.25); await self?.requestCapture(token: token, session: id) } catch {}
         }
     }
 
@@ -491,7 +558,7 @@ public actor UltraViewerHostSession {
         let deadlineID = viewerDeadlineID
         viewerDeadline = Task { [weak self] in
             do {
-                try await Task.sleep(for: .seconds(seconds))
+                try await Task.sleep(seconds: TimeInterval(seconds))
                 await self?.viewerExpired(token: token, request: request, deadline: deadlineID)
             } catch {}
         }
@@ -520,8 +587,10 @@ public actor UltraViewerHostSession {
     private func endViewer(reason: String?) async {
         let old = peer
         peer = nil; peerPhase = .none; controlAllowed = false
+        sessionToolsGate.reset()
         sideSwitch.reset()
         clipboardAllowed = false
+        files.reset(); fileOutbox.removeAll(); fileSendRevision = UUID(); fileSending = false
         controlRevision = UUID(); initializationID = UUID()
         waitingForAck = false; captureTicket = nil; pendingFrame = nil; lastFrame = nil
         cancelViewerDeadline()
@@ -590,8 +659,10 @@ public actor UltraViewerHostSession {
         cancelViewerDeadline()
         captureTimer?.cancel(); captureTimer = nil
         controlAllowed = false; peer = nil; peerPhase = .none
+        sessionToolsGate.reset()
         sideSwitch.reset()
         clipboardAllowed = false
+        files.reset(); fileOutbox.removeAll(); fileSendRevision = UUID(); fileSending = false
         pendingFrame = nil; lastFrame = nil; captureTicket = nil; waitingForAck = false
         configuration = nil; relayRequest = nil; relayAddress = nil
         defaultRelayAddresses = ""; defaultRelayHostnames = ""

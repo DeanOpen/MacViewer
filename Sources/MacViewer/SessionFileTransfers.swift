@@ -63,7 +63,14 @@ enum ReceivedFilesFolder {
 
     /// `folder/name`, or `folder/name (2).ext` … when that name is taken.
     static func uniqueURL(for name: String, in folder: URL) -> URL {
-        let safe = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+        var safe = name.map { character -> String in
+            character.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
+                || ["/", "\\", ":"].contains(String(character)) ? "_" : String(character)
+        }.joined()
+        if safe.isEmpty || safe == "." || safe == ".." { safe = "file" }
+        safe = safe.decomposedStringWithCanonicalMapping
+        // HFS/APFS names have a byte budget. Leave room for a collision suffix.
+        while safe.utf8.count > 240 { safe.removeLast() }
         let base = (safe as NSString).deletingPathExtension
         let ext = (safe as NSString).pathExtension
         var candidate = folder.appendingPathComponent(safe.isEmpty ? "file" : safe)

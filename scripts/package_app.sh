@@ -76,7 +76,7 @@ cat > "$app_directory/Contents/Info.plist" <<PLIST
   <key>CFBundleLocalizations</key><array><string>en</string><string>vi</string></array>
   <key>CFBundleShortVersionString</key><string>$app_version</string>
   <key>CFBundleVersion</key><string>$build_number</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 DeanOpen · MIT License</string>

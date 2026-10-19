@@ -59,7 +59,7 @@ public actor FramedTCPTransport {
         security: Security = .plaintext,
         initialRequest: Data? = nil,
         expectsHTTPResponse: Bool = false,
-        timeout: Duration = .seconds(10)
+        timeout: TimeInterval = 10
     ) async throws -> AsyncThrowingStream<Data, any Swift.Error> {
         guard connection == nil else { throw Error.alreadyOpen }
         guard let endpointPort = NWEndpoint.Port(rawValue: port), port > 0 else { throw Error.invalidPort }
@@ -108,7 +108,7 @@ public actor FramedTCPTransport {
                     }
                     deadline = Task { [weak self] in
                         do {
-                            try await Task.sleep(for: timeout)
+                            try await Task.sleep(seconds: timeout)
                             await self?.timedOut(token: token)
                         } catch {}
                     }

@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "MacViewer",
     defaultLocalization: "en",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v12)],
     products: [
         .library(name: "UltraViewerProtocol", targets: ["UltraViewerProtocol"]),
         .executable(name: "MacViewer", targets: ["MacViewer"]),

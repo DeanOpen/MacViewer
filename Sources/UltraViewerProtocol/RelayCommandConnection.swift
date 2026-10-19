@@ -24,7 +24,7 @@ public enum RelayCommandConnection {
         security: FramedTCPTransport.Security,
         initialRequest: Data? = nil,
         expectsHTTPResponse: Bool = true,
-        attemptTimeout: Duration = .seconds(3),
+        attemptTimeout: TimeInterval = 3,
         maximumPayloadLength: Int = 16 * 1024 * 1024
     ) async throws -> (transport: FramedTCPTransport, stream: AsyncThrowingStream<Data, any Swift.Error>) {
         guard port > 0 else { throw FramedTCPTransport.Error.invalidPort }
@@ -58,12 +58,12 @@ public enum RelayCommandConnection {
         let security: FramedTCPTransport.Security
         let initialRequest: Data?
         let expectsHTTPResponse: Bool
-        let timeout: Duration
+        let timeout: TimeInterval
     }
 
     static func openCandidates<Connection: Sendable, Stream: Sendable>(
         addresses: [String], port: UInt16, security: FramedTCPTransport.Security,
-        initialRequest: Data?, expectsHTTPResponse: Bool, attemptTimeout: Duration,
+        initialRequest: Data?, expectsHTTPResponse: Bool, attemptTimeout: TimeInterval,
         makeConnection: @Sendable () -> Connection,
         openConnection: @Sendable (Connection, Attempt) async throws -> Stream,
         closeConnection: @Sendable (Connection) async -> Void

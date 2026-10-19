@@ -2,6 +2,43 @@ import Foundation
 import Testing
 @testable import UltraViewerProtocol
 
+@Test func hostedMultipleMonitorMetadataRoundTripsAndRejectsOutsideCanvas() throws {
+    let monitors: [HostedScreenMonitor] = [
+        .init(left: 0, top: 120, right: 1920, bottom: 1200),
+        .init(left: 1920, top: 0, right: 3840, bottom: 1080)
+    ]
+    let payload = try HostedScreenMessage.initialization(width: 3840, height: 1200,
+        version: "6.6.133", monitors: monitors)
+    let parts = try MultipartPayload.decode(payload)
+    #expect(parts[8] == Data("0:120:1920:1200|1920:0:3840:1080|".utf8))
+    #expect(try RemoteControlCommands.monitors(from: parts[8]).count == 2)
+    for invalid in [HostedScreenMonitor(left: -1, top: 0, right: 1, bottom: 1),
+                    .init(left: 0, top: 0, right: 3841, bottom: 1),
+                    .init(left: 0, top: 0, right: 1, bottom: 1201),
+                    .init(left: 1, top: 0, right: 1, bottom: 1)] {
+        #expect(throws: HostedScreenMessage.Error.invalidGeometry) {
+            try HostedScreenMessage.initialization(width: 3840, height: 1200,
+                version: "6.6.133", monitors: [invalid])
+        }
+    }
+    #expect(throws: HostedScreenMessage.Error.invalidGeometry) {
+        try HostedScreenMessage.initialization(width: 3840, height: 1200,
+            version: "6.6.133", monitors: Array(repeating: monitors[0], count: 65))
+    }
+}
+
+@Test func hostedDisplaySwitchRequiresInitializationEvenForIdenticalPixelsAndSize() {
+    let pixels = Data(repeating: 0, count: 8)
+    let first = HostedScreenFrame(width: 2, height: 2, rgb555BottomUp: pixels, layoutIdentifier: "built-in")
+    let second = HostedScreenFrame(width: 2, height: 2, rgb555BottomUp: pixels, layoutIdentifier: "external")
+    #expect(!first.hasSameLayout(as: second))
+    let changedMonitors = HostedScreenFrame(width: 2, height: 2, rgb555BottomUp: pixels,
+        monitors: [.init(left: 0, top: 0, right: 1, bottom: 2), .init(left: 1, top: 0, right: 2, bottom: 2)],
+        layoutIdentifier: "built-in")
+    #expect(!first.hasSameLayout(as: changedMonitors))
+    #expect(first.hasSameLayout(as: first))
+}
+
 @Test func hostedInitializationHasEstablishedFieldsWithoutOptionalClaims() throws {
     let payload = try HostedScreenMessage.initialization(width: 1920, height: 1080,
         version: "6.6.125", virtualLeft: -1920, virtualTop: 100)

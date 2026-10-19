@@ -31,7 +31,7 @@ struct MacViewerApp: App {
                 }
                 .appLanguage()
         }
-        .defaultSize(width: 1120, height: 800)
+        .defaultWindowSize(width: 1120, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appInfo) {
@@ -97,7 +97,7 @@ struct MacViewerSettings: View {
             }
             Section("History") {
                 Toggle("Remember successfully connected partner IDs", isOn: $rememberPartners)
-                    .onChange(of: rememberPartners) { _, enabled in
+                    .onChange(of: rememberPartners) { enabled in
                         if !enabled { model.clearRecentPartners() }
                     }
                 Text("Saved passwords are kept separately in macOS Keychain.")
@@ -108,7 +108,7 @@ struct MacViewerSettings: View {
                 Button("Forget saved passwords", action: model.forgetSavedPasswords)
             }
             Section("Received files") {
-                LabeledContent("Save to") {
+                LabeledRow("Save to") {
                     Text(ReceivedFilesFolder.current().map { ($0.path as NSString).abbreviatingWithTildeInPath }
                          ?? L("Ask when the first file arrives"))
                         .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
@@ -133,17 +133,17 @@ struct MacViewerSettings: View {
                 Slider(value: $scrollSensitivity, in: 0.25...2, step: 0.25) {
                     Text("Scroll speed")
                 }
-                LabeledContent("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
+                LabeledRow("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
             }
         }
-        .formStyle(.grouped)
+        .groupedForm()
     }
 
     private var about: some View {
         Form {
             Section("About") {
-                LabeledContent("Application", value: "MacViewer \(Self.version)")
-                LabeledContent("Author", value: MacViewerAbout.author)
+                LabeledRow("Application", value: "MacViewer \(Self.version)")
+                LabeledRow("Author", value: MacViewerAbout.author)
                 Link("github.com/DeanOpen/MacViewer", destination: MacViewerAbout.repository)
                 Link("UltraViewer (ultraviewer.net)", destination: MacViewerAbout.ultraViewer)
                 Toggle("Automatically check for updates", isOn: $checkForUpdates)
@@ -154,7 +154,7 @@ struct MacViewerSettings: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
+        .groupedForm()
     }
 }
 
@@ -188,7 +188,7 @@ final class MacViewerAppDelegate: NSObject, NSApplicationDelegate {
             // for long on an unresponsive network.
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { await self.closeConnections() }
-                group.addTask { try? await Task.sleep(for: .seconds(2)) }
+                group.addTask { try? await Task.sleep(seconds: 2) }
                 await group.next()
                 group.cancelAll()
             }
@@ -226,7 +226,7 @@ enum MacViewerAbout {
         link[.link] = ultraViewer
         credits.append(NSAttributedString(string: "UltraViewer", attributes: link))
         NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
-        NSApp.activate()
+        NSApp.activateApp()
     }
 }
 

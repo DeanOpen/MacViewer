@@ -59,6 +59,7 @@ public actor UltraViewerRelaySession {
         case fileProgress(transferID: String, bytes: Int64)
         case fileCompleted(transferID: String)
         case fileCanceled(transferID: String)
+        case fileFailed(transferID: String, reason: String)
     }
 
     public struct Diagnostics: Sendable, Encodable {
@@ -156,28 +157,16 @@ public actor UltraViewerRelaySession {
     private var peerPingStarted: UInt64?
     private var heartbeatTicks = 0
     private var capturedCommands: Set<UInt8> = []
-    /// File transfers of this session, keyed by transfer ID.
-    private var incomingFiles: [String: IncomingFile] = [:]
-    private var outgoingFiles: [String: OutgoingFile] = [:]
-
-    private struct IncomingFile {
-        let size: Int64
-        var handle: FileHandle?
-        var received: Int64 = 0
-    }
-
-    private struct OutgoingFile {
-        let handle: FileHandle
-        let size: Int64
-        var nextOffset: Int64 = 1      // 1-based, as on the wire
-        var acknowledged: Int64 = 0    // bytes the host confirmed
-        var inFlight: [Int64] = []     // sizes of parts sent but not yet confirmed
-    }
-
-    /// Part size and number of unconfirmed parts, as UltraViewer uses them.
-    private static let filePartSize = 32_000
-    private static let filePartsInFlight = 2
+    private var files = FileTransferEngine()
+    private var fileOutbox: [FileTransferMessage] = []
+    private var fileSending = false
+    private var fileSendRevision = UUID()
     public private(set) var diagnostics = Diagnostics()
+    /// Reinitializing an already authenticated peer changes only the screen;
+    /// pending files/chat remain available on that same selected route.
+    private var canUseSessionTools: Bool {
+        diagnostics.peerAccepted && (phase == .active || phase == .login)
+    }
 
     public init() {}
 
@@ -251,14 +240,14 @@ public actor UltraViewerRelaySession {
     }
 
     public func sendChat(_ text: String) async throws {
-        guard phase == .active else { throw Failure.notConnected }
+        guard canUseSessionTools else { throw Failure.notConnected }
         let message = try ChatProtocol.viewerToHost(text: text)
         try await sendToPeer(message.payload, formatFlag: message.formatFlag)
         diagnostics.chatMessagesSent += 1
     }
 
     public func sendTyping(_ typing: Bool) async throws {
-        guard phase == .active else { throw Failure.notConnected }
+        guard canUseSessionTools else { throw Failure.notConnected }
         let message = ChatProtocol.viewerToHostTyping(typing)
         try await sendToPeer(message.payload, formatFlag: message.formatFlag)
     }
@@ -289,7 +278,7 @@ public actor UltraViewerRelaySession {
     }
 
     public func sendClipboard(_ text: String) async throws {
-        guard phase == .active, clipboardAllowed else { throw Failure.notConnected }
+        guard canUseSessionTools, clipboardAllowed else { throw Failure.notConnected }
         let message = try ClipboardProtocol.viewerToHost(text)
         try await sendToPeer(message.payload, formatFlag: message.formatFlag)
         diagnostics.clipboardMessagesSent += 1
@@ -419,7 +408,7 @@ public actor UltraViewerRelaySession {
         directWindow?.cancel()
         directWindow = Task { [weak self] in
             do {
-                try await Task.sleep(for: .seconds(15))
+                try await Task.sleep(seconds: 15)
                 await self?.directWindowExpired(token: token)
             } catch {}
         }
@@ -447,7 +436,8 @@ public actor UltraViewerRelaySession {
                 // A response can race Network's send-completion callback. Hold
                 // one small init, but never select it before Login was written.
                 if directPendingInitialization == nil, envelope.payload.count <= 65_536,
-                   let parts = try? MultipartPayload.decode(envelope.payload), parts.first == Data([0]) {
+                   let parts = try? MultipartPayload.decode(envelope.payload),
+                   let tag = parts.first, tag == Data([0]) || tag == Data([0, 0]) {
                     directPendingInitialization = (id, envelope.payload)
                 }
                 return
@@ -484,7 +474,7 @@ public actor UltraViewerRelaySession {
         directDeadline?.cancel()
         directDeadline = Task { [weak self] in
             do {
-                try await Task.sleep(for: .seconds(8))
+                try await Task.sleep(seconds: 8)
                 await self?.directCandidateExpired(id, token: token)
             } catch {}
         }
@@ -651,19 +641,23 @@ public actor UltraViewerRelaySession {
             return
         }
         guard case let .forward(address, port, _, payload) = envelope else { return }
-        // The old relay stays alive as fallback, but it cannot overwrite the
-        // renderer, permissions or input ACK state of an initialized direct peer.
-        guard directState.selected == nil else { return }
+        // Windows can keep session tools on the original relay while screens
+        // use LAN. A known relay may deliver only authenticated auxiliary data;
+        // it cannot overwrite direct initialization, permissions or screen ACKs.
         let knownSource = address == targetAddress && port == targetPort
         let parts: [Data]
         do { parts = try MultipartPayload.decode(payload) }
         catch {
-            if !knownSource { diagnostics.ignoredSources += 1; return }
+            if !knownSource || directState.selected != nil { diagnostics.ignoredSources += 1; return }
             throw error
         }
         guard let command = parts.first?.first else {
-            if !knownSource { diagnostics.ignoredSources += 1; return }
+            if !knownSource || directState.selected != nil { diagnostics.ignoredSources += 1; return }
             throw Failure.malformedInitialization
+        }
+        if directState.selected != nil {
+            guard AuthenticatedAuxiliaryRoute.permitsRelay(command: command,
+                isActive: canUseSessionTools, isKnownSource: knownSource) else { return }
         }
         guard knownSource || (command == 26 && parts.count > 1 && parts[1] == Data(connectionHash.utf8)) else {
             diagnostics.ignoredSources += 1
@@ -703,7 +697,11 @@ public actor UltraViewerRelaySession {
                 guard parts.count >= 11 else { throw Failure.malformedInitialization }
                 upgradingID = id
             }
-        } else if directState.selected != nil { return }
+        } else if directState.selected != nil {
+            guard AuthenticatedAuxiliaryRoute.permitsRelay(command: command,
+                isActive: canUseSessionTools,
+                isKnownSource: relayAddress == targetAddress && relayPort == targetPort) else { return }
+        }
         if diagnostics.receivedCommands.count < 128 { diagnostics.receivedCommands.append(command) }
         diagnostics.latestPartLengths = Array(parts.prefix(32)).map(\.count)
         if command == 0 || command == 1 { try capture(payload, command: command) }
@@ -725,12 +723,12 @@ public actor UltraViewerRelaySession {
                 if audioEnabled { try emit(.computerAudio(Data(repeating: 0, count: count))) }
             }
         case 5, 33:
-            guard phase == .active, clipboardAllowed,
+            guard canUseSessionTools, clipboardAllowed,
                   let text = try? ClipboardProtocol.decodeHostToViewer(parts: parts) else { return }
             diagnostics.clipboardMessagesReceived += 1
             try emit(.clipboard(text))
         case 12, 29, 30:
-            guard phase == .active, let event = try? ChatProtocol.decodeViewerParts(parts) else { return }
+            guard canUseSessionTools, let event = try? ChatProtocol.decodeViewerParts(parts) else { return }
             switch event {
             case let .message(text): diagnostics.chatMessagesReceived += 1; try emit(.chat(text))
             case let .typing(typing): try emit(.typing(typing))
@@ -767,7 +765,7 @@ public actor UltraViewerRelaySession {
                 heartbeat = Task { [weak self] in
                     while !Task.isCancelled {
                         do {
-                            try await Task.sleep(for: .seconds(10))
+                            try await Task.sleep(seconds: 10)
                             await self?.sendHeartbeat(token)
                         } catch { return }
                     }
@@ -788,6 +786,7 @@ public actor UltraViewerRelaySession {
             guard token == generation, phase == .active else { return }
             // TCP ConnectionType1: source sends ASCII17 after initialization.
             try await sendToPeer(Data("17".utf8))
+            try await applyFileUpdate(FileTransferEngine.Update())
         case 1:
             guard phase == .active, let renderer else { return }
             diagnostics.screenPayloadBytes += UInt64(payload.count)
@@ -842,47 +841,9 @@ public actor UltraViewerRelaySession {
             }
             remoteViewOnly = value != 0
             if phase == .active { try emit(.inputPermission(!remoteViewOnly)) }
-        case FileTransferOffer.command:
-            guard phase == .active, let offer = FileTransferOffer.decode(parts: parts) else { return }
-            incomingFiles[offer.transferID] = IncomingFile(size: offer.size)
-            try emit(.fileOffer(offer))
-        case 14:
-            // The host accepts a file this Mac offered and asks for byte 1.
-            guard parts.count >= 2 else { return }
-            let id = String(decoding: parts[1], as: UTF8.self)
-            guard outgoingFiles[id] != nil else { return }
-            for _ in 0..<Self.filePartsInFlight { try await sendNextFilePart(id) }
-        case 21:
-            // The receiver confirms one data part.
-            guard parts.count >= 2 else { return }
-            let id = String(decoding: parts[1], as: UTF8.self)
-            if var file = outgoingFiles[id], !file.inFlight.isEmpty {
-                file.acknowledged += file.inFlight.removeFirst()
-                outgoingFiles[id] = file
-                try emit(.fileProgress(transferID: id, bytes: file.acknowledged))
-                if file.acknowledged >= file.size { finishOutgoing(id); try emit(.fileCompleted(transferID: id)) }
-                else { try await sendNextFilePart(id) }
-            }
-        case 15:
-            guard let chunk = FileTransferOffer.decodeChunk(parts: parts),
-                  var file = incomingFiles[chunk.transferID], let handle = file.handle else { return }
-            try handle.seek(toOffset: UInt64(chunk.offset - 1))
-            try handle.write(contentsOf: chunk.data)
-            file.received = max(file.received, Int64(chunk.offset - 1 + chunk.data.count))
-            incomingFiles[chunk.transferID] = file
-            let ack = FileTransferOffer.viewerChunkReceived(transferID: chunk.transferID)
-            try await sendToPeer(ack.payload, formatFlag: ack.formatFlag)
-            try emit(.fileProgress(transferID: chunk.transferID, bytes: file.received))
-            if file.received >= file.size {
-                try? handle.close(); incomingFiles[chunk.transferID] = nil
-                try emit(.fileCompleted(transferID: chunk.transferID))
-            }
-        case 16:
-            guard parts.count >= 2 else { return }
-            let id = String(decoding: parts[1], as: UTF8.self)
-            guard incomingFiles[id] != nil || outgoingFiles[id] != nil else { return }
-            closeFileTransfer(id)
-            try emit(.fileCanceled(transferID: id))
+        case 13, 14, 15, 16, 21:
+            guard canUseSessionTools, let message = FileTransferMessage.decodeHostParts(parts) else { return }
+            try await applyFileUpdate(files.consume(message))
         default: break
         }
     }
@@ -906,7 +867,7 @@ public actor UltraViewerRelaySession {
         deadline?.cancel()
         deadline = Task { [weak self] in
             do {
-                try await Task.sleep(for: .seconds(20))
+                try await Task.sleep(seconds: 20)
                 guard let self else { return }
                 await self.expired(token)
             } catch {}
@@ -968,7 +929,7 @@ public actor UltraViewerRelaySession {
     private func finish(_ error: (any Swift.Error)?) async {
         guard phase != .closed else { return }
         phase = .closed
-        for id in Array(incomingFiles.keys) + Array(outgoingFiles.keys) { closeFileTransfer(id) }
+        files.reset(); fileOutbox.removeAll(); fileSendRevision = UUID(); fileSending = false
         generation = UUID()
         deadline?.cancel(); deadline = nil
         heartbeat?.cancel(); heartbeat = nil
@@ -1003,64 +964,55 @@ public actor UltraViewerRelaySession {
         String((0..<count).map { _ in alphabet.randomElement()! })
     }
 
-    /// Offers the file at `url` to the Windows computer; returns the transfer ID.
-    /// Data is read one part at a time once the other side accepts.
+    /// Offers a regular file, then reads bounded parts after the peer accepts.
     public func sendFile(_ url: URL) async throws -> FileTransferOffer {
-        guard phase == .active else { throw Failure.notConnected }
-        let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
-        let handle = try FileHandle(forReadingFrom: url)
-        let offer = FileTransferOffer(transferID: Self.newTransferID(), fileName: url.lastPathComponent, size: size)
-        outgoingFiles[offer.transferID] = OutgoingFile(handle: handle, size: size)
-        let message = offer.viewerToHost()
-        do { try await sendToPeer(message.payload, formatFlag: message.formatFlag) }
-        catch { finishOutgoing(offer.transferID); throw error }
+        guard canUseSessionTools else { throw Failure.notConnected }
+        let (offer, update) = try files.offerFile(url)
+        do { try await applyFileUpdate(update) }
+        catch { _ = files.cancel(offer.transferID); throw error }
         return offer
     }
 
-    /// Accepts an offered file and writes it to `destination` (replaced if present).
+    /// The caller chose this destination explicitly. Existing files are preserved.
     public func acceptFile(_ transferID: String, to destination: URL) async throws {
-        guard phase == .active, var file = incomingFiles[transferID] else { throw Failure.notConnected }
-        FileManager.default.createFile(atPath: destination.path, contents: nil)
-        file.handle = try FileHandle(forWritingTo: destination)
-        incomingFiles[transferID] = file
-        let accept = FileTransferOffer.viewerAccept(transferID: transferID)
-        try await sendToPeer(accept.payload, formatFlag: accept.formatFlag)
-        if file.size == 0 { closeFileTransfer(transferID); try emit(.fileCompleted(transferID: transferID)) }
+        guard canUseSessionTools else { throw Failure.notConnected }
+        let update = try files.accept(transferID, to: destination)
+        do { try await applyFileUpdate(update) }
+        catch { _ = files.cancel(transferID); throw error }
     }
 
-    /// Declines an offer or stops a transfer in either direction.
     public func cancelFile(_ transferID: String) async throws {
-        guard incomingFiles[transferID] != nil || outgoingFiles[transferID] != nil else { return }
-        closeFileTransfer(transferID)
-        guard phase == .active else { return }
-        let cancel = FileTransferOffer.viewerCancel(transferID: transferID)
-        try await sendToPeer(cancel.payload, formatFlag: cancel.formatFlag)
+        let update = files.cancel(transferID)
+        guard canUseSessionTools else { return }
+        try await applyFileUpdate(update)
     }
 
-    private func sendNextFilePart(_ id: String) async throws {
-        guard var file = outgoingFiles[id], file.nextOffset <= file.size else { return }
-        try file.handle.seek(toOffset: UInt64(file.nextOffset - 1))
-        let data = try file.handle.read(upToCount: Self.filePartSize) ?? Data()
-        guard !data.isEmpty else { return }
-        let offset = file.nextOffset
-        file.nextOffset += Int64(data.count)
-        file.inFlight.append(Int64(data.count))
-        outgoingFiles[id] = file
-        try await sendToPeer(FileTransferOffer.viewerChunk(transferID: id, offset: Int(offset), data: data), formatFlag: false)
-    }
-
-    private func finishOutgoing(_ id: String) {
-        try? outgoingFiles.removeValue(forKey: id)?.handle.close()
-    }
-
-    private func closeFileTransfer(_ id: String) {
-        finishOutgoing(id)
-        try? incomingFiles.removeValue(forKey: id)?.handle?.close()
-    }
-
-    private static func newTransferID() -> String {
-        // Same shape as the IDs Windows creates: 20 digits.
-        "3" + (0..<19).map { _ in String(Int.random(in: 0...9)) }.joined()
+    /// Queue the whole batch before any await. An ACK may reenter this actor
+    /// while a socket send is suspended, but can only append after this batch.
+    private func applyFileUpdate(_ update: FileTransferEngine.Update) async throws {
+        for event in update.events {
+            switch event {
+            case let .offer(offer): try emit(.fileOffer(offer))
+            case let .progress(id, bytes): try emit(.fileProgress(transferID: id, bytes: bytes))
+            case let .completed(id): try emit(.fileCompleted(transferID: id))
+            case let .canceled(id):
+                fileOutbox.removeAll { $0.transferID == id }
+                try emit(.fileCanceled(transferID: id))
+            case let .failed(id, reason):
+                fileOutbox.removeAll { $0.transferID == id }
+                try emit(.fileFailed(transferID: id, reason: reason))
+            }
+        }
+        fileOutbox.append(contentsOf: update.messages)
+        guard !fileSending else { return }
+        fileSending = true
+        let revision = fileSendRevision
+        defer { if fileSendRevision == revision { fileSending = false } }
+        while canUseSessionTools, fileSendRevision == revision, !fileOutbox.isEmpty {
+            let message = fileOutbox.removeFirst()
+            let encoded = try message.encode(for: .viewer)
+            try await sendToPeer(encoded.payload, formatFlag: encoded.formatFlag)
+        }
     }
 
     private func capture(_ payload: Data, command: UInt8) throws {

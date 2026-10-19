@@ -10,7 +10,7 @@
 
 ### [Download MacViewer for macOS](https://github.com/DeanOpen/MacViewer/releases/latest)
 
-Latest version, macOS 14 or later
+Latest version, macOS 12 or later
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -62,23 +62,26 @@ Windows executable code.
 
 - Share the Mac's screen with another UltraViewer user, after you approve
   each connection on the Mac
+- Choose one Mac display or **All displays** before or during a connection.
+  When sharing all displays, the Windows UltraViewer monitor menu can show
+  one display at a time or the entire desktop
 - A built-in guide for granting **Screen Recording** and **Accessibility**
   permissions
 - You approve viewing or control separately. You can end a session or pause
   incoming access at any time.
 - Copy the Mac's password or **make a new one**; the ID stays the same
 - Set this Mac's **display name** in Settings (unaccented letters, up to 20)
+- Send and receive files from the incoming session's chat, with the same
+  save, progress and cancel controls as an outgoing session
 
 ### General
 
 - English and Tiếng Việt UI, or follow the system language
-- Universal binary (Apple silicon + Intel), macOS 14 Sonoma or later
+- Universal binary (Apple silicon + Intel), macOS 12 Monterey or later
 
 ### Not supported yet
 
-File transfer while Windows controls this Mac, microphone/voice chat, Mac-host
-audio, sharing more than one Mac
-display, and unattended Mac access. Older Windows UltraViewer versions,
+Microphone/voice chat, Mac-host audio, and unattended Mac access. Older Windows UltraViewer versions,
 non-US keyboard layouts, input methods other than Vietnamese and Chinese,
 and 8-bit screen mode haven't been validated.
 
@@ -123,6 +126,19 @@ guide:
 Enter the Mac's ID and password on the other computer, then approve the request
 on the Mac. If macOS asks, reopen MacViewer after you change Screen Recording.
 
+Use **Share display** in the Mac's sharing card to choose a display or **All
+displays**. With all displays shared, use UltraViewer's monitor menu on Windows
+to switch between individual displays and the combined desktop. Display choice
+is remembered on this Mac; if a selected display is disconnected, sharing stops
+instead of switching to a different display.
+
+Chat and file transfer work in both session roles. Incoming files are written
+only after **Save** and never overwrite an existing file. UltraViewer's native
+host file-name field uses the Windows ANSI code page without declaring it;
+MacViewer uses an ASCII fallback for non-ASCII names when hosting, and a UTF-8
+or Windows-1252 interpretation when receiving that legacy field. File contents
+are transferred as binary data.
+
 ## Use with AI agents (MCP)
 
 MacViewer includes an MCP server, so AI apps and coding agents can see the
@@ -160,7 +176,7 @@ Tools: `session_status`, `screenshot`, `click`, `move_mouse`, `drag`, `scroll`,
 
 ## Building from source
 
-Requirements: macOS 14+, Xcode 16+ / Swift 6+.
+Requirements: macOS 12+ to run (building needs macOS 14+), Xcode 16+ / Swift 6+.
 
 ```sh
 git clone https://github.com/DeanOpen/MacViewer.git

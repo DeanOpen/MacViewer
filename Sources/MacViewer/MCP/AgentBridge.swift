@@ -172,7 +172,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
             approvalWaiters.append(continuation)
             approvalQueue.append(client)
             if pendingApproval == nil { pendingApproval = PendingApproval(client: client) }
-            NSApp.activate()
+            NSApp.activateApp()
         }
         return decision != .deny
     }
@@ -283,7 +283,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         }
         model.connect()
         for _ in 0..<450 where model.phase == .connecting {
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(seconds: 0.1)
         }
         switch model.phase {
         case .connected:
@@ -298,7 +298,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
     private func screenshot(_ arguments: JSONValue) async -> MCPToolResult {
         guard allowScreen else { return .error("Viewing the screen is turned off in MacViewer › Settings › AI Agents.") }
         guard model.phase == .connected else { return .error(Self.notConnected) }
-        for _ in 0..<30 where model.displayedFrame == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        for _ in 0..<30 where model.displayedFrame == nil { try? await Task.sleep(seconds: 0.1) }
         guard let image = model.displayedFrame?.image else { return .error("No screen image has arrived yet. Try again.") }
         let maxWidth = max(320, arguments["max_width"]?.intValue ?? 1280)
         guard let encoded = Self.jpeg(image, maxWidth: maxWidth) else { return .error("The screenshot could not be encoded.") }
@@ -442,7 +442,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         isActing = true
         actingTask?.cancel()
         actingTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
+            try? await Task.sleep(seconds: 8)
             guard !Task.isCancelled else { return }
             self?.isActing = false
         }

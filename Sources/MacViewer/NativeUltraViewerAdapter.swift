@@ -80,6 +80,7 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                     case let .fileProgress(id, bytes): pair.continuation.yield(.fileProgress(transferID: id, bytes: bytes))
                     case let .fileCompleted(id): pair.continuation.yield(.fileCompleted(transferID: id))
                     case let .fileCanceled(id): pair.continuation.yield(.fileCanceled(transferID: id))
+                    case let .fileFailed(id, reason): pair.continuation.yield(.fileFailed(transferID: id, reason: reason))
                     case let .typing(typing): pair.continuation.yield(.typing(typing))
                     case let .clipboard(text): pair.continuation.yield(.clipboard(text))
                     case let .computerAudio(pcm): pair.continuation.yield(.computerAudio(pcm))

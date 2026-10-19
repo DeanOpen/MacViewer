@@ -513,6 +513,7 @@ final class ConnectionModel: ObservableObject {
         case let .fileProgress(id, bytes): tools.fileProgress(id, bytes: bytes)
         case let .fileCompleted(id): tools.fileCompleted(id)
         case let .fileCanceled(id): tools.fileCanceled(id)
+        case let .fileFailed(id, reason): tools.fileFailed(id, reason: reason)
         case let .chat(text): tools.receiveChat(text)
         case let .typing(typing): tools.receiveTyping(typing)
         case let .clipboard(text): tools.receiveClipboard(text)

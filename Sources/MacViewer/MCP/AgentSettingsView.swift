@@ -99,7 +99,7 @@ struct AgentSettingsView: View {
                 }
             } header: { Text("Recent activity") }
         }
-        .formStyle(.grouped)
+        .groupedForm()
         .onAppear(perform: refresh)
         .confirmationDialog(confirmationTitle, isPresented: Binding(
             get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), titleVisibility: .visible,
@@ -282,7 +282,7 @@ struct AgentSettingsView: View {
         notice = message
         noticeTask?.cancel()
         noticeTask = Task {
-            try? await Task.sleep(for: .seconds(6))
+            try? await Task.sleep(seconds: 6)
             guard !Task.isCancelled else { return }
             notice = nil
         }

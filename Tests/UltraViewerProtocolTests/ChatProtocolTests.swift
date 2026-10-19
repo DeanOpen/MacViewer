@@ -10,7 +10,7 @@ import Testing
     #expect(viewer.payload == Data([0x31, 0, 0x32, 0, 0x7c, 0, 0x7c, 0, 0x7c, 0,
                                     0x41, 0, 0xbf, 0x1e, 0x3d, 0xd8, 0x42, 0xde]))
     let host = try ChatProtocol.hostToViewer(text: text)
-    #expect(host == Data([1, 0, 0, 0, 12, 8, 0, 0, 0,
+    #expect(host == Data([2, 0, 0, 0, 12, 0, 8, 0, 0, 0,
                          0x41, 0, 0xbf, 0x1e, 0x3d, 0xd8, 0x42, 0xde]))
     #expect(try ChatProtocol.decodeViewerParts(MultipartPayload.decode(host)) == .message(text))
     #expect(try ChatProtocol.decodeHostPayload(Data(("12|||" + text).utf8)) == .message(text))
@@ -22,13 +22,29 @@ import Testing
         #expect(viewer.formatFlag)
         #expect(viewer.payload == Data(isTyping ? [0x32, 0, 0x39, 0] : [0x33, 0, 0x30, 0]))
         let host = try ChatProtocol.hostToViewerTyping(isTyping)
-        #expect(host == Data([1, 0, 0, 0, isTyping ? 29 : 30]))
+        #expect(host == Data([2, 0, 0, 0, isTyping ? 29 : 30, 0]))
         #expect(try ChatProtocol.decodeViewerParts(MultipartPayload.decode(host)) == .typing(isTyping))
         #expect(try ChatProtocol.decodeHostPayload(Data((isTyping ? "29" : "30").utf8)) == .typing(isTyping))
     }
     #expect(try ChatProtocol.decodeHostPayload(Data("20".utf8)) == nil)
     #expect(try ChatProtocol.decodeViewerParts([Data([20])]) == nil)
     #expect(try ChatProtocol.decodeViewerParts([]) == nil)
+}
+
+@Test func windowsHostChatUsesInt16CommandDespiteOneByteHelperName() throws {
+    // Independent Windows-shaped fixture. VFunction.Get1ByteFromNumber(u1)
+    // calls BitConverter.GetBytes(Int16), making command 12 exactly 0c 00.
+    let windowsMessage = Data([2, 0, 0, 0, 0x0c, 0, 8, 0, 0, 0,
+                               0x74, 0, 0x65, 0, 0x73, 0, 0x74, 0])
+    #expect(try ChatProtocol.decodeViewerParts(MultipartPayload.decode(windowsMessage)) == .message("test"))
+    for (command, expected) in [(UInt8(29), true), (UInt8(30), false)] {
+        let windowsTyping = Data([2, 0, 0, 0, command, 0])
+        #expect(try ChatProtocol.decodeViewerParts(MultipartPayload.decode(windowsTyping)) == .typing(expected))
+    }
+    // Older MacViewer peers emitted a byte command; they remain compatible.
+    #expect(try ChatProtocol.decodeViewerParts([Data([12]), Data([0x41, 0])]) == .message("A"))
+    #expect(try ChatProtocol.decodeViewerParts([Data([29])]) == .typing(true))
+    #expect(try ChatProtocol.decodeViewerParts([Data([30])]) == .typing(false))
 }
 
 @Test func chatPreservesNewlinesAndDelimitersOnlyWhereWireSupportsThem() throws {
@@ -53,7 +69,7 @@ import Testing
     #expect(throws: ChatProtocol.Error.invalidEncoding) {
         try ChatProtocol.decodeHostPayload(Data([0x31, 0x32, 0x7c, 0x7c, 0x7c, 0xff]))
     }
-    for parts in [[Data([12])], [Data([12, 0]), Data()], [Data([29]), Data()],
+    for parts in [[Data([12])], [Data([12, 1]), Data()], [Data([12, 0, 0]), Data()], [Data([29]), Data()],
                   [Data([12]), Data(), Data()]] {
         #expect(throws: ChatProtocol.Error.malformedMessage) { try ChatProtocol.decodeViewerParts(parts) }
     }
@@ -61,7 +77,7 @@ import Testing
         #expect(throws: ChatProtocol.Error.invalidText) { try ChatProtocol.hostToViewer(text: text) }
     }
     let boundary = String(repeating: "a", count: ChatProtocol.maximumTextBytes / 2)
-    #expect(try ChatProtocol.hostToViewer(text: boundary).count == ChatProtocol.maximumTextBytes + 9)
+    #expect(try ChatProtocol.hostToViewer(text: boundary).count == ChatProtocol.maximumTextBytes + 10)
     #expect(throws: ChatProtocol.Error.textTooLarge) { try ChatProtocol.viewerToHost(text: boundary + "a") }
     #expect(throws: ChatProtocol.Error.textTooLarge) {
         try ChatProtocol.decodeViewerParts([Data([12]), Data(repeating: 0x41, count: ChatProtocol.maximumTextBytes + 1)])

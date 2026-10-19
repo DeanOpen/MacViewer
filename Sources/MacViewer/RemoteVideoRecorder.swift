@@ -61,7 +61,7 @@ actor RemoteVideoRecorder {
         // are dropped, so encoding cannot create an unbounded frame backlog.
         if frameCount == 0 {
             for _ in 0..<100 where !input.isReadyForMoreMediaData {
-                try await Task.sleep(for: .milliseconds(10))
+                try await Task.sleep(seconds: 0.01)
                 guard writer.status == .writing else { throw VideoError.encoding(writer.error?.localizedDescription) }
             }
         }
@@ -86,7 +86,7 @@ actor RemoteVideoRecorder {
                 // including when the remote desktop has not changed for a while.
                 let time = CMTime(seconds: max(0, elapsed), preferredTimescale: 600)
                 for _ in 0..<100 where !input.isReadyForMoreMediaData {
-                    try await Task.sleep(for: .milliseconds(10))
+                    try await Task.sleep(seconds: 0.01)
                 }
                 if input.isReadyForMoreMediaData, time > lastTime { try appendReady(lastImage, at: time) }
             }

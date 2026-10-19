@@ -19,6 +19,8 @@ final class MacHostingModel: ObservableObject {
     @Published private(set) var isEndingViewer = false
     @Published private(set) var isApprovingSideSwitch = false
     @Published private(set) var permissions = MacHostingPermissions.refresh()
+    @Published private(set) var displays: [MacSharingDisplay] = []
+    @Published private(set) var selectedDisplayKey = MacDisplayLayout.allDisplaysKey
 
     /// Invoked only after this Mac's user approves and54 is acknowledged. The
     /// PIN is transient; the outgoing connection must not save it in history.
@@ -37,6 +39,39 @@ final class MacHostingModel: ObservableObject {
     private var sideSwitchGeneration = UUID()
     private let capture = MacScreenCapture()
     private let input = MacHostInputController()
+    private let defaults: UserDefaults
+    private let displayProvider: @MainActor () -> [MacSharingDisplay]
+    private var displayRevision = UUID()
+    private var capturedDisplayRevision: UUID?
+    static let displaySelectionKey = "MacViewer.hostDisplaySelection"
+
+    init(defaults: UserDefaults = .standard,
+         displayProvider: @escaping @MainActor () -> [MacSharingDisplay] = MacSharingDisplay.current) {
+        self.defaults = defaults
+        self.displayProvider = displayProvider
+        selectedDisplayKey = defaults.string(forKey: Self.displaySelectionKey) ?? MacDisplayLayout.allDisplaysKey
+        refreshDisplays()
+    }
+
+    func refreshDisplays() {
+        let current = displayProvider()
+        guard current != displays else { return }
+        displays = current
+        // Keep a disconnected display's selection. Capture stops rather than
+        // sharing another display that the user did not select.
+        displayRevision = UUID()
+        input.setGeometry(nil)
+    }
+
+    func selectDisplay(_ key: String) {
+        guard !isApproving, key != selectedDisplayKey,
+              key == MacDisplayLayout.allDisplaysKey || displays.contains(where: { $0.key == key }) else { return }
+        selectedDisplayKey = key
+        defaults.set(key, forKey: Self.displaySelectionKey)
+        displayRevision = UUID()
+        // Release held buttons/keys before a new display can receive input.
+        input.setGeometry(nil)
+    }
 
     var isRunning: Bool { phase != .off && phase != .failed }
     var canView: Bool { permissions.screenRecording }
@@ -86,15 +121,29 @@ final class MacHostingModel: ObservableObject {
                         status = "An incoming connection needs your approval."
                     case let .connected(request):
                         cancelSideSwitch()
+                        let newViewer = viewer?.id != request.id
                         viewer = request; pendingRequest = nil; isApproving = false; isEndingViewer = false; phase = .sharing
+                        input.setGeometry(capturedDisplayRevision == displayRevision ? capture.geometry : nil)
                         status = allowsControl ? "Your Mac is being viewed and controlled." : "Your Mac is being viewed."
-                        activateTools(session: session, viewerID: request.id, token: token)
+                        if newViewer { activateTools(session: session, viewerID: request.id, token: token) }
                     case let .chat(sessionID, text):
                         if viewer?.id == sessionID, phase == .sharing { tools.receiveChat(text) }
                     case let .typing(sessionID, active):
                         if viewer?.id == sessionID, phase == .sharing { tools.receiveTyping(active) }
                     case let .clipboard(sessionID, text):
                         if viewer?.id == sessionID, phase == .sharing { tools.receiveClipboard(text) }
+                    case let .fileOffer(sessionID, offer):
+                        if viewer?.id == sessionID, phase == .sharing {
+                            tools.receiveFileOffer(id: offer.transferID, name: offer.fileName, size: offer.size)
+                        }
+                    case let .fileProgress(sessionID, id, bytes):
+                        if viewer?.id == sessionID, phase == .sharing { tools.fileProgress(id, bytes: bytes) }
+                    case let .fileCompleted(sessionID, id):
+                        if viewer?.id == sessionID, phase == .sharing { tools.fileCompleted(id) }
+                    case let .fileCanceled(sessionID, id):
+                        if viewer?.id == sessionID, phase == .sharing { tools.fileCanceled(id) }
+                    case let .fileFailed(sessionID, id, reason):
+                        if viewer?.id == sessionID, phase == .sharing { tools.fileFailed(id, reason: reason) }
                     case let .sideSwitchRequested(sessionID, request):
                         guard phase == .sharing, !isEndingViewer, !isApprovingSideSwitch,
                               viewer?.id == sessionID, request.sessionID == sessionID,
@@ -103,8 +152,10 @@ final class MacHostingModel: ObservableObject {
                     case let .captureRequested(ticket): captureNextFrame(ticket, token: token, session: session)
                     case let .input(sessionID, payload):
                         guard allowsControl, viewer?.id == sessionID,
+                              input.geometry != nil,
                               await session.isControlAllowed(for: sessionID) else { continue }
-                        guard generation == token, viewer?.id == sessionID, allowsControl else { continue }
+                        guard generation == token, viewer?.id == sessionID, allowsControl,
+                              input.geometry != nil else { continue }
                         do { _ = try input.handleAuthenticatedPayload(payload) }
                         catch {
                             allowsControl = false; input.releaseAll()
@@ -157,7 +208,7 @@ final class MacHostingModel: ObservableObject {
         captureTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let frame = try await capture.capture()
+                let frame = try await captureSelectedDisplays()
                 try Task.checkCancellation()
                 guard generation == token, captureGeneration == captureToken,
                       pendingRequest?.id == request.id else { return }
@@ -363,7 +414,16 @@ final class MacHostingModel: ObservableObject {
         }, sendTyping: { [weak self] typing in
             guard let self, generation == token, viewer?.id == viewerID, phase == .sharing else { throw CancellationError() }
             try await session.sendTyping(typing, session: viewerID)
-        })
+        }, files: SessionFileActions(send: { [weak self] url in
+            guard let self, generation == token, viewer?.id == viewerID, phase == .sharing else { throw CancellationError() }
+            return try await session.sendFile(url, session: viewerID).transferID
+        }, accept: { [weak self] id, destination in
+            guard let self, generation == token, viewer?.id == viewerID, phase == .sharing else { throw CancellationError() }
+            try await session.acceptFile(id, to: destination, session: viewerID)
+        }, cancel: { [weak self] id in
+            guard let self, generation == token, viewer?.id == viewerID, phase == .sharing else { throw CancellationError() }
+            try await session.cancelFile(id, session: viewerID)
+        }))
     }
 
     private func captureNextFrame(_ ticket: UUID, token: UUID, session: UltraViewerHostSession) {
@@ -373,11 +433,15 @@ final class MacHostingModel: ObservableObject {
         captureTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let frame = try await capture.capture()
+                let frame = try await captureSelectedDisplays()
                 try Task.checkCancellation()
                 guard generation == token, captureGeneration == captureToken, viewer?.id == viewerID else { return }
-                input.setGeometry(capture.geometry)
+                let geometry = capture.geometry
+                let displayToken = displayRevision
                 try await session.submitFrame(frame, ticket: ticket)
+                guard generation == token, captureGeneration == captureToken, viewer?.id == viewerID,
+                      displayRevision == displayToken else { return }
+                input.setGeometry(geometry)
             } catch {
                 guard generation == token, captureGeneration == captureToken,
                       viewer?.id == viewerID, !Task.isCancelled else { return }
@@ -386,5 +450,27 @@ final class MacHostingModel: ObservableObject {
                 await session.endViewer(session: viewerID)
             }
         }
+    }
+
+    private func captureSelectedDisplays() async throws -> HostedScreenFrame {
+        for _ in 0..<3 {
+            try Task.checkCancellation()
+            refreshDisplays()
+            let revision = displayRevision
+            do {
+                let frame = try await capture.capture(selection: selectedDisplayKey)
+                try Task.checkCancellation()
+                guard displayRevision == revision else { continue }
+                capturedDisplayRevision = revision
+                return frame
+            } catch MacScreenCaptureError.displayConfigurationChanged {
+                continue
+            } catch {
+                refreshDisplays()
+                if displayRevision != revision { continue }
+                throw error
+            }
+        }
+        throw MacScreenCaptureError.displayConfigurationChanged
     }
 }

@@ -68,16 +68,20 @@ struct ConnectionView: View {
                 window.close()
             }
         }
-        .onChange(of: hosting.identifier) { _, id in if id == nil { revealPassword = false } }
-        .onChange(of: model.phase) { _, phase in
+        .onChange(of: hosting.identifier) { id in if id == nil { revealPassword = false } }
+        .onChange(of: model.phase) { phase in
             if phase == .connecting || phase == .connected { showSession = true }
             if phase == .disconnected || phase == .idle { remoteCapture.endSession() }
         }
-        .onChange(of: model.displayedFrame?.id) { _, _ in
+        .onChange(of: model.displayedFrame?.id) { _ in
             if let image = model.displayedFrame?.image { remoteCapture.recordFrame(image) }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             hosting.refreshPermissions()
+            hosting.refreshDisplays()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            hosting.refreshDisplays()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             model.releaseRemoteInput()
@@ -126,7 +130,7 @@ struct ConnectionView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
-                .background(.blue.gradient, in: RoundedRectangle(cornerRadius: 8))
+                .background(LinearGradient(colors: [Color.blue.opacity(0.8), .blue], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
                 Text("MacViewer").font(.system(size: 14, weight: .semibold))
                 Text("Works with UltraViewer on Windows").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -137,6 +141,7 @@ struct ConnectionView: View {
                     Text("Viewing: \(hosting.viewer?.displayName ?? "Windows computer")")
                     Toggle("Allow control of this Mac", isOn: incomingControlBinding)
                         .disabled(incomingControlDisabled)
+                    MacSharingDisplayPicker(hosting: hosting, showsExplanation: false)
                     if !hosting.permissions.accessibility {
                         Button("Enable Accessibility…", action: hosting.requestAccessibility)
                     }
@@ -161,7 +166,7 @@ struct ConnectionView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             if let release = updater.availableRelease { updateButton(release) }
-            SettingsLink { Image(systemName: "gearshape").font(.title3) }
+            OpenSettingsButton { Image(systemName: "gearshape").font(.title3) }
                 .buttonStyle(.plain).help("Settings")
                 .padding(.leading, 12)
         }
@@ -189,8 +194,7 @@ struct ConnectionView: View {
             .padding(.horizontal, 24).padding(.vertical, 20)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollClipDisabled(false)
+        .scrollBouncesOnlyWhenNeeded()
         .clipped()
     }
 
@@ -329,6 +333,7 @@ struct ConnectionView: View {
                             .font(.callout).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 }
+                MacSharingDisplayPicker(hosting: hosting)
                 permissionRows
                 VStack(alignment: .leading, spacing: 7) {
                     Label(hosting.phase == .sharing ? LF("Sharing with %@", incomingPeerName)
@@ -562,7 +567,7 @@ struct ConnectionView: View {
                 }
             }
             .padding(.vertical, 10).padding(.horizontal, 6)
-            .background(.regularMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8))
+            .background(.regularMaterial, in: CornerRoundedRectangle(topLeading: 8, bottomLeading: 8))
             .shadow(radius: 2)
         }
         .buttonStyle(.plain)
@@ -575,7 +580,7 @@ struct ConnectionView: View {
         Button { showSessionToolbar = true } label: {
             Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
                 .frame(width: 44, height: 16)
-                .background(.regularMaterial, in: UnevenRoundedRectangle(bottomLeadingRadius: 8, bottomTrailingRadius: 8))
+                .background(.regularMaterial, in: CornerRoundedRectangle(bottomLeading: 8, bottomTrailing: 8))
                 .shadow(radius: 2)
         }
         .buttonStyle(.plain)
@@ -639,10 +644,10 @@ struct ConnectionView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: showChatSidebar)
-            .onChange(of: showChatSidebar) { _, shown in
+            .onChange(of: showChatSidebar) { shown in
                 if shown { readMessages = model.tools.messages.count }
             }
-            .onChange(of: model.tools.messages.count) { _, count in
+            .onChange(of: model.tools.messages.count) { count in
                 if showChatSidebar || count < readMessages { readMessages = count }
             }
             HStack(spacing: 12) {
@@ -739,7 +744,7 @@ struct ConnectionView: View {
                     return
                 }
                 if hosting.phase == .failed { return }
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await Task.sleep(seconds: 0.25)
             }
         }
     }
@@ -758,6 +763,7 @@ private struct IncomingMacConnectionView: View {
             }
             Text("Allow viewing to share your screen. Allow control also gives access to your mouse and keyboard.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            MacSharingDisplayPicker(hosting: hosting)
             if !hosting.canView {
                 Button("Set up Screen Recording…") {
                     MacPermissionsSetupWindowController.shared.show(hosting: hosting, initialPermission: .screenRecording)

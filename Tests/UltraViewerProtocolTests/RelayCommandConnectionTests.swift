@@ -40,7 +40,7 @@ private actor CommandDialTrace {
     let result = try await RelayCommandConnection.openCandidates(
         addresses: ["192.0.2.9", "192.0.2.4", "192.0.2.7"], port: 443,
         security: .tls(serverName: "ultraviewer", certificateName: "functions3.ultraviewer.net"),
-        initialRequest: header, expectsHTTPResponse: true, attemptTimeout: .seconds(3),
+        initialRequest: header, expectsHTTPResponse: true, attemptTimeout: 3,
         makeConnection: { FakeCommandConnection() },
         openConnection: { _, attempt in
             await trace.record(attempt)
@@ -54,7 +54,7 @@ private actor CommandDialTrace {
     #expect(closed.count == 2)
     #expect(!closed.contains(result.connection.id))
     for attempt in attempts {
-        #expect(attempt.port == 443 && attempt.timeout == .seconds(3))
+        #expect(attempt.port == 443 && attempt.timeout == 3)
         #expect(attempt.initialRequest == header && attempt.expectsHTTPResponse)
         switch attempt.security {
         case let .tls(serverName, certificateName):
@@ -69,7 +69,7 @@ private actor CommandDialTrace {
     do {
         let _: (connection: FakeCommandConnection, stream: Int) = try await RelayCommandConnection.openCandidates(
             addresses: ["192.0.2.1", "192.0.2.2"], port: 2112, security: .plaintext,
-            initialRequest: nil, expectsHTTPResponse: false, attemptTimeout: .seconds(3),
+            initialRequest: nil, expectsHTTPResponse: false, attemptTimeout: 3,
             makeConnection: { FakeCommandConnection() }, openConnection: { _, attempt in
                 await trace.record(attempt)
                 throw CommandDialFailure.unavailable(attempt.address)
@@ -88,7 +88,7 @@ private actor CommandDialTrace {
     do {
         let _: (connection: FakeCommandConnection, stream: Int) = try await RelayCommandConnection.openCandidates(
             addresses: ["192.0.2.1", "192.0.2.2"], port: 443, security: .plaintext,
-            initialRequest: nil, expectsHTTPResponse: false, attemptTimeout: .seconds(3),
+            initialRequest: nil, expectsHTTPResponse: false, attemptTimeout: 3,
             makeConnection: { FakeCommandConnection() }, openConnection: { _, attempt in
                 await trace.record(attempt)
                 throw CancellationError()
@@ -105,7 +105,7 @@ private actor CommandDialTrace {
     let task = Task {
         try await RelayCommandConnection.openCandidates(
             addresses: ["192.0.2.1", "192.0.2.2"], port: 443, security: .plaintext,
-            initialRequest: nil, expectsHTTPResponse: false, attemptTimeout: .seconds(3),
+            initialRequest: nil, expectsHTTPResponse: false, attemptTimeout: 3,
             makeConnection: { FakeCommandConnection() }, openConnection: { _, attempt in
                 await trace.record(attempt)
                 withUnsafeCurrentTask { $0?.cancel() }

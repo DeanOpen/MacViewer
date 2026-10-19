@@ -46,6 +46,12 @@ final class SessionToolsModel: ObservableObject {
     @Published private(set) var clipboardNotice: String?
     @Published private(set) var transfers: [String: SessionFileTransfer] = [:]
     private var fileActions: SessionFileActions?
+    // Windows may accept and ACK while sendFile's socket write is suspended,
+    // before its returned ID has been inserted into the transcript.
+    private enum EarlyFileEvent {
+        case progress(Int64), completed, canceled, failed(String)
+    }
+    private var earlyFileEvents: [String: EarlyFileEvent] = [:]
     private var noticeTask: Task<Void, Never>?
 
     typealias SendText = @MainActor (String) async throws -> Void
@@ -83,7 +89,7 @@ final class SessionToolsModel: ObservableObject {
         deactivate()
         self.sendChat = sendChat; self.sendClipboard = sendClipboard; self.setSharing = setSharing
         self.sendTyping = sendTyping; fileActions = files
-        messages = []; transfers = [:]; draft = ""; errorMessage = nil; isActive = true
+        messages = []; transfers = [:]; earlyFileEvents = [:]; draft = ""; errorMessage = nil; isActive = true
         if defaults.bool(forKey: Self.shareClipboardKey) { setClipboardEnabled(true) }
     }
 
@@ -95,7 +101,7 @@ final class SessionToolsModel: ObservableObject {
         clipboardTask?.cancel(); clipboardTask = nil
         clipboardSetup?.cancel(); clipboardSetup = nil
         sendChat = nil; sendClipboard = nil; setSharing = nil
-        sendTyping = nil; fileActions = nil
+        sendTyping = nil; fileActions = nil; earlyFileEvents = [:]
         for (id, transfer) in transfers where !transfer.isFinished {
             transfers[id]?.state = .failed("The connection ended.")
         }
@@ -118,7 +124,7 @@ final class SessionToolsModel: ObservableObject {
         clipboardNotice = outgoing ? "Sent to the other computer" : "Copied from the other computer"
         noticeTask?.cancel()
         noticeTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(seconds: 3)
             guard !Task.isCancelled else { return }
             self?.clipboardNotice = nil
         }
@@ -158,7 +164,7 @@ final class SessionToolsModel: ObservableObject {
         guard typing else { return }
         let token = generation
         peerTypingTask = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+            do { try await Task.sleep(seconds: 4) } catch { return }
             guard let self, generation == token else { return }
             peerIsTyping = false
         }
@@ -170,11 +176,11 @@ final class SessionToolsModel: ObservableObject {
         let token = generation, typing = !draft.isEmpty
         typingTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: .milliseconds(250))
+                try await Task.sleep(seconds: 0.25)
                 guard let self, generation == token, isActive else { return }
                 try await sendTyping(typing)
                 if typing {
-                    try await Task.sleep(for: .seconds(2))
+                    try await Task.sleep(seconds: 2)
                     guard generation == token, isActive else { return }
                     try await sendTyping(false)
                 }
@@ -221,7 +227,7 @@ final class SessionToolsModel: ObservableObject {
     private func beginClipboardPolling(token: UUID, revision: UUID) {
         clipboardTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                do { try await Task.sleep(seconds: 0.5) } catch { return }
                 guard let self, generation == token, clipboardGeneration == revision,
                       isActive, clipboardEnabled else { return }
                 await pollClipboardOnce()
@@ -266,6 +272,7 @@ final class SessionToolsModel: ObservableObject {
                     transfers[id] = SessionFileTransfer(id: id, name: url.lastPathComponent, size: size,
                                                         isOutgoing: true, state: .waiting)
                     append(url.lastPathComponent, outgoing: true, transferID: id)
+                    replayEarlyFileEvent(id)
                 } catch {
                     guard let self, generation == token else { return }
                     errorMessage = "The file could not be sent."
@@ -301,29 +308,57 @@ final class SessionToolsModel: ObservableObject {
     func cancelFile(_ id: String) {
         guard let transfer = transfers[id], !transfer.isFinished else { return }
         transfers[id]?.state = .canceled
-        if !transfer.isOutgoing, transfer.state == .transferring, let location = transfer.location {
-            try? FileManager.default.removeItem(at: location)
-        }
+        // The session engine closes/deletes only files it exclusively created.
         let cancel = fileActions?.cancel
         Task { try? await cancel?(id) }
     }
 
     func fileProgress(_ id: String, bytes: Int64) {
-        guard let transfer = transfers[id], !transfer.isFinished else { return }
-        transfers[id]?.bytes = bytes
+        guard let transfer = transfers[id] else { rememberEarly(.progress(bytes), id: id); return }
+        guard !transfer.isFinished else { return }
+        transfers[id]?.bytes = min(transfer.size, max(0, bytes))
         transfers[id]?.state = .transferring
     }
 
     func fileCompleted(_ id: String) {
-        guard let transfer = transfers[id], !transfer.isFinished else { return }
+        guard let transfer = transfers[id] else { rememberEarly(.completed, id: id); return }
+        guard !transfer.isFinished else { return }
         transfers[id]?.bytes = transfer.size
         transfers[id]?.state = .completed
     }
 
     func fileCanceled(_ id: String) {
-        guard let transfer = transfers[id], !transfer.isFinished else { return }
+        guard let transfer = transfers[id] else { rememberEarly(.canceled, id: id); return }
+        guard !transfer.isFinished else { return }
         transfers[id]?.state = .canceled
-        if !transfer.isOutgoing, let location = transfer.location { try? FileManager.default.removeItem(at: location) }
+    }
+
+    func fileFailed(_ id: String, reason: String) {
+        guard let transfer = transfers[id] else { rememberEarly(.failed(reason), id: id); return }
+        guard !transfer.isFinished else { return }
+        transfers[id]?.state = .failed(reason)
+    }
+
+    private func rememberEarly(_ event: EarlyFileEvent, id: String) {
+        guard isActive, fileActions != nil, earlyFileEvents[id] != nil || earlyFileEvents.count < 16 else { return }
+        // Never let a late progress update replace a terminal result.
+        if let existing = earlyFileEvents[id] {
+            switch existing {
+            case .completed, .canceled, .failed: return
+            case .progress: break
+            }
+        }
+        earlyFileEvents[id] = event
+    }
+
+    private func replayEarlyFileEvent(_ id: String) {
+        guard let event = earlyFileEvents.removeValue(forKey: id) else { return }
+        switch event {
+        case let .progress(bytes): fileProgress(id, bytes: bytes)
+        case .completed: fileCompleted(id)
+        case .canceled: fileCanceled(id)
+        case let .failed(reason): fileFailed(id, reason: reason)
+        }
     }
 
     func revealFile(_ id: String) {

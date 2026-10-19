@@ -33,14 +33,16 @@ public enum ChatProtocol {
         Outbound(payload: utf16LE(isTyping ? "29" : "30"), formatFlag: true)
     }
 
-    /// clsRemoteClient.SendData: multipart [[12], UTF-16LE text].
+    /// clsRemoteClient.Send: multipart [Int16LE(12), UTF-16LE text].
+    /// The shipped Get1ByteFromNumber helper actually calls
+    /// BitConverter.GetBytes(Int16), so its command occupies two bytes.
     public static func hostToViewer(text: String) throws -> Data {
         try validate(text)
-        return try MultipartPayload.encode([Data([12]), utf16LE(text)], limits: chatLimits)
+        return try MultipartPayload.encode([Data([12, 0]), utf16LE(text)], limits: chatLimits)
     }
 
     public static func hostToViewerTyping(_ isTyping: Bool) throws -> Data {
-        try MultipartPayload.encode([Data([isTyping ? 29 : 30])], limits: chatLimits)
+        try MultipartPayload.encode([Data([isTyping ? 29 : 30, 0])], limits: chatLimits)
     }
 
     /// Decode text already normalized from the relay's ANSI/Unicode flag into
@@ -62,7 +64,11 @@ public enum ChatProtocol {
     /// Decode the host-to-viewer multipart form after bounded multipart parsing.
     public static func decodeViewerParts(_ parts: [Data]) throws -> Event? {
         guard let command = parts.first?.first, [12, 29, 30].contains(command) else { return nil }
-        guard parts[0].count == 1 else { throw Error.malformedMessage }
+        // Windows 6.6.133 emits Int16LE commands. Retain the one-byte form used
+        // by earlier MacViewer builds, but reject truncated/ambiguous headers.
+        guard parts[0].count == 1 || parts[0] == Data([command, 0]) else {
+            throw Error.malformedMessage
+        }
         if command != 12 {
             guard parts.count == 1 else { throw Error.malformedMessage }
             return .typing(command == 29)
@@ -76,7 +82,7 @@ public enum ChatProtocol {
     }
 
     private static let chatLimits = MultipartPayload.Limits(
-        maximumPayloadLength: maximumTextBytes + 9,
+        maximumPayloadLength: maximumTextBytes + 10,
         maximumPartLength: maximumTextBytes, maximumPartCount: 2)
 
     private static func validate(_ text: String) throws {

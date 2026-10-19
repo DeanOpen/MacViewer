@@ -85,6 +85,7 @@ enum RemoteSessionEvent {
     case fileProgress(transferID: String, bytes: Int64)
     case fileCompleted(transferID: String)
     case fileCanceled(transferID: String)
+    case fileFailed(transferID: String, reason: String)
     case disconnected(String?)
 }
 

@@ -6,11 +6,35 @@ public struct HostedScreenFrame: Sendable {
     public let width: Int
     public let height: Int
     public let rgb555BottomUp: Data
+    public let monitors: [HostedScreenMonitor]
+    /// Local capture identity; forces reinitialization when equally sized
+    /// displays are switched. This value is never sent to the remote viewer.
+    public let layoutIdentifier: String?
 
-    public init(width: Int, height: Int, rgb555BottomUp: Data) {
+    public init(width: Int, height: Int, rgb555BottomUp: Data, monitors: [HostedScreenMonitor] = [],
+                layoutIdentifier: String? = nil) {
         self.width = width
         self.height = height
         self.rgb555BottomUp = rgb555BottomUp
+        self.monitors = monitors
+        self.layoutIdentifier = layoutIdentifier
+    }
+
+    public func hasSameLayout(as other: HostedScreenFrame) -> Bool {
+        width == other.width && height == other.height && monitors == other.monitors
+            && layoutIdentifier == other.layoutIdentifier
+    }
+}
+
+/// Monitor bounds in transmitted canvas pixels, not the Mac's logical points.
+public struct HostedScreenMonitor: Sendable, Equatable {
+    public let left: Int32
+    public let top: Int32
+    public let right: Int32
+    public let bottom: Int32
+
+    public init(left: Int32, top: Int32, right: Int32, bottom: Int32) {
+        self.left = left; self.top = top; self.right = right; self.bottom = bottom
     }
 }
 
@@ -39,11 +63,12 @@ public enum HostedScreenMessage {
     public static let maximumDimension = 8192
     private static let maximumBlockBytes = 128 * 1024
 
-    /// One monitor rectangle has a trailing separator because native InitMonitor
+    /// Every monitor rectangle has a trailing separator because native InitMonitor
     /// splits on '|', uses UBound as the count, and iterates count-1 entries.
     /// Version must select the recovered >=6.0.0 command1 drawing contract.
     public static func initialization(width: Int, height: Int, version: String,
-                                      virtualLeft: Int32 = 0, virtualTop: Int32 = 0) throws -> Data {
+                                      virtualLeft: Int32 = 0, virtualTop: Int32 = 0,
+                                      monitors: [HostedScreenMonitor] = []) throws -> Data {
         _ = try checkedPixelCount(width: width, height: height)
         let components = version.split(separator: ".", omittingEmptySubsequences: false)
         guard version.utf8.count <= 64, components.count == 3,
@@ -54,7 +79,16 @@ public enum HostedScreenMessage {
         // sender. Omitted part14 selects native default tile16.
         let right = Int64(virtualLeft) + Int64(width), bottom = Int64(virtualTop) + Int64(height)
         guard right <= Int64(Int32.max), bottom <= Int64(Int32.max) else { throw Error.invalidGeometry }
-        let monitor = "\(virtualLeft):\(virtualTop):\(right):\(bottom)|"
+        guard monitors.count <= 64 else { throw Error.invalidGeometry }
+        for monitor in monitors {
+            guard monitor.left >= virtualLeft, monitor.top >= virtualTop,
+                  monitor.right > monitor.left, monitor.bottom > monitor.top,
+                  Int64(monitor.right) <= right, Int64(monitor.bottom) <= bottom else {
+                throw Error.invalidGeometry
+            }
+        }
+        let monitor = monitors.isEmpty ? "\(virtualLeft):\(virtualTop):\(right):\(bottom)|"
+            : monitors.map { "\($0.left):\($0.top):\($0.right):\($0.bottom)|" }.joined()
         let parts = [Data([0]), long(Int32(width)), long(Int32(height)), Data(), Data(),
                      Data([0]), Data(version.utf8), Data([1]), Data(monitor.utf8),
                      long(virtualLeft), long(virtualTop)]
