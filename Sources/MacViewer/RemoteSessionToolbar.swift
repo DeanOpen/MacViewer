@@ -274,13 +274,14 @@ extension RemoteSessionToolbar: @preconcurrency Equatable {
 /// in the complete remote image through RemoteScreenView's existing mapping.
 @MainActor
 struct RemoteScreenViewport: View {
-    let image: CGImage
+    let feed: RemoteScreenFeed
+    /// Pixel size of the shown image; only used at actual size.
+    let imageSize: CGSize
     let displayScale: RemoteDisplayScale
     let smoothScaling: Bool
     let scrollSensitivity: Double
     let inputEnabled: Bool
     let onInput: (RemoteInput) -> Void
-    var cursor: RemoteCursorPresenter.Snapshot? = nil
     @Environment(\.displayScale) private var backingScale
 
     var body: some View {
@@ -288,8 +289,8 @@ struct RemoteScreenViewport: View {
             if displayScale == .fit {
                 screen.frame(width: geometry.size.width, height: geometry.size.height)
             } else {
-                let size = CGSize(width: CGFloat(image.width) / max(1, backingScale),
-                                  height: CGFloat(image.height) / max(1, backingScale))
+                let size = CGSize(width: imageSize.width / max(1, backingScale),
+                                  height: imageSize.height / max(1, backingScale))
                 ScrollView([.horizontal, .vertical]) {
                     screen.frame(width: size.width, height: size.height)
                         .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
@@ -300,7 +301,7 @@ struct RemoteScreenViewport: View {
     }
 
     private var screen: some View {
-        RemoteScreenView(image: image, smoothScaling: smoothScaling,
-                         scrollSensitivity: scrollSensitivity, inputEnabled: inputEnabled, onInput: onInput, cursor: cursor)
+        RemoteScreenView(feed: feed, smoothScaling: smoothScaling,
+                         scrollSensitivity: scrollSensitivity, inputEnabled: inputEnabled, onInput: onInput)
     }
 }

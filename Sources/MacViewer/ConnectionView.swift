@@ -73,8 +73,9 @@ struct ConnectionView: View {
             if phase == .connecting || phase == .connected { showSession = true }
             if phase == .disconnected || phase == .idle { remoteCapture.endSession() }
         }
-        .onChange(of: model.displayedFrame?.id) { _ in
-            if let image = model.displayedFrame?.image { remoteCapture.recordFrame(image) }
+        .onAppear {
+            let capture = remoteCapture
+            model.screenFeed.onFrame = { capture.recordFrame($0) }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             hosting.refreshPermissions()
@@ -601,7 +602,7 @@ struct ConnectionView: View {
                 displayScale: $remoteDisplayScale, smoothScaling: $smoothScreen,
                 forwardShortcuts: Binding(get: { forwardShortcuts }, set: { model.releaseRemoteInput(); forwardShortcuts = $0 }),
                 imageQuality: $remoteImageQuality,
-                tools: model.tools, capture: remoteCapture, hasImage: model.displayedFrame != nil,
+                tools: model.tools, capture: remoteCapture, hasImage: model.displayedSize != nil,
                 currentImage: { model.displayedFrame?.image },
                 callbacks: .init(home: { model.releaseRemoteInput(); showSession = false },
                                  disconnect: model.disconnect, releaseInput: model.releaseRemoteInput,
@@ -628,10 +629,10 @@ struct ConnectionView: View {
             if let error = model.errorMessage { errorLabel(error).padding(16) }
             HStack(spacing: 0) {
                 Group {
-                    if let frame = model.displayedFrame, model.phase == .connected {
-                        RemoteScreenViewport(image: frame.image, displayScale: remoteDisplayScale, smoothScaling: smoothScreen,
-                                             scrollSensitivity: scrollSensitivity, inputEnabled: model.controlEnabled,
-                                             onInput: model.send, cursor: model.remoteCursor)
+                    if let size = model.displayedSize, model.phase == .connected {
+                        RemoteScreenViewport(feed: model.screenFeed, imageSize: size, displayScale: remoteDisplayScale,
+                                             smoothScaling: smoothScreen, scrollSensitivity: scrollSensitivity,
+                                             inputEnabled: model.controlEnabled, onInput: model.send)
                     } else {
                         VStack(spacing: 16) {
                             ProgressView().controlSize(.large)
@@ -663,7 +664,7 @@ struct ConnectionView: View {
                 Text(L(model.status)).lineLimit(1)
                 Spacer()
                 if agents.isActing || agents.isStoppedForSession { agentBadge }
-                if let frame = model.frame { Text("\(frame.image.width) × \(frame.image.height)").monospacedDigit() }
+                if let size = model.remoteScreenSize { Text("\(Int(size.width)) × \(Int(size.height))").monospacedDigit() }
                 Button {
                     model.releaseRemoteInput(); forwardShortcuts.toggle()
                 } label: {

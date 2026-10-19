@@ -2,33 +2,55 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
+/// Carries remote frames and the remote cursor straight to the screen view,
+/// outside SwiftUI, so a new frame redraws one layer instead of the window.
+@MainActor
+final class RemoteScreenFeed {
+    private(set) var image: CGImage?
+    private(set) var cursor: RemoteCursorPresenter.Snapshot?
+    /// Called for every new frame, e.g. by the screen recorder.
+    var onFrame: ((CGImage) -> Void)?
+    fileprivate weak var view: RemoteScreenNSView?
+
+    func show(_ image: CGImage?) {
+        self.image = image
+        view?.needsDisplay = true
+        if let image { onFrame?(image) }
+    }
+
+    func showCursor(_ cursor: RemoteCursorPresenter.Snapshot?) {
+        self.cursor = cursor
+        view?.needsDisplay = true
+    }
+}
+
 /// Displays only decoded peer frames; it never captures the local Mac screen.
 struct RemoteScreenView: NSViewRepresentable {
-    let image: CGImage
+    let feed: RemoteScreenFeed
     let smoothScaling: Bool
     let scrollSensitivity: Double
     let inputEnabled: Bool
     let onInput: (RemoteInput) -> Void
-    var cursor: RemoteCursorPresenter.Snapshot? = nil
 
     func makeNSView(context: Context) -> RemoteScreenNSView {
         RemoteScreenNSView(frame: .zero)
     }
 
     func updateNSView(_ view: RemoteScreenNSView, context: Context) {
-        view.image = image
+        view.feed = feed
+        feed.view = view
         view.smoothScaling = smoothScaling
         view.scrollSensitivity = scrollSensitivity
         view.inputEnabled = inputEnabled
         view.onInput = onInput
-        view.remoteCursor = cursor
         view.needsDisplay = true
     }
 }
 
 final class RemoteScreenNSView: NSView {
     static let forwardShortcutsKey = "MacViewer.forwardShortcuts"
-    var image: CGImage?
+    var feed: RemoteScreenFeed?
+    var image: CGImage? { feed?.image }
     var smoothScaling = true
     var scrollSensitivity = 1.0
     var inputEnabled = false {
@@ -37,7 +59,7 @@ final class RemoteScreenNSView: NSView {
         }
     }
     var onInput: ((RemoteInput) -> Void)?
-    var remoteCursor: RemoteCursorPresenter.Snapshot?
+    var remoteCursor: RemoteCursorPresenter.Snapshot? { feed?.cursor }
     private let cursorLayer = CALayer()
     /// Shows the input method's uncommitted text (e.g. Telex "việ") locally;
     /// the peer receives it only once the input method commits it.
@@ -73,6 +95,23 @@ final class RemoteScreenNSView: NSView {
 
     override var wantsUpdateLayer: Bool { true }
 
+    private var taggedSource: CGImage?
+    private var taggedImage: CGImage?
+
+    /// The frame tagged with the window's color space. A DeviceRGB image made
+    /// Core Animation convert every pixel of every frame on the main thread
+    /// before showing it; a matching color space shows the bytes directly.
+    /// Windows does not color-manage the remote desktop either.
+    private var displayImage: CGImage? {
+        guard let image else { return nil }
+        if image === taggedSource, let taggedImage { return taggedImage }
+        let space = window?.colorSpace?.cgColorSpace ?? window?.screen?.colorSpace?.cgColorSpace
+        let tagged = space.flatMap { image.copy(colorSpace: $0) } ?? image
+        taggedSource = image
+        taggedImage = tagged
+        return tagged
+    }
+
     override func updateLayer() {
         // Keep scaling/compositing on Core Animation instead of resampling a
         // full-resolution NSImage on the input/UI thread for every frame.
@@ -82,7 +121,7 @@ final class RemoteScreenNSView: NSView {
         layer?.contentsGravity = .resizeAspect
         layer?.minificationFilter = smoothScaling ? .linear : .nearest
         layer?.magnificationFilter = smoothScaling ? .linear : .nearest
-        layer?.contents = image
+        layer?.contents = displayImage
         updateRemoteCursor()
         CATransaction.commit()
     }
