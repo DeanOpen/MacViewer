@@ -98,13 +98,15 @@ struct ConnectionView: View {
             UpdateSheet(updater: updater, endsConnections: model.isSessionActive || hosting.viewer != nil)
                 .appLanguage()
         })
-        .alert(LF("Allow %@ to use MacViewer?", agents.pendingApproval?.client ?? ""), isPresented: Binding(
+        .alert(LF("Allow %@ to use MacViewer?", agents.pendingApproval?.client.name ?? ""), isPresented: Binding(
             get: { agents.pendingApproval != nil }, set: { _ in })) {
                 Button("Allow once") { agents.resolveApproval(.once) }
                 Button("Always allow") { agents.resolveApproval(.always) }
                 Button("Don’t allow", role: .cancel) { agents.resolveApproval(.deny) }
             } message: {
                 Text("An AI agent wants to use MacViewer. It can do what you allowed in Settings › AI Agents, such as seeing the remote screen and using the mouse and keyboard while Control is on.")
+                    + Text(verbatim: "\n\n")
+                    + Text(LF("Program: %@", agents.pendingApproval?.client.program ?? L("Unknown")))
             }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             model.disconnect(); hosting.stop()

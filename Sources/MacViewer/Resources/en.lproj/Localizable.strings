@@ -504,3 +504,5 @@
 "Messages and files appear here. Drag files onto the chat to send them." = "Messages and files appear here. Drag files onto the chat to send them.";
 "Send a file (or drag it here)" = "Send a file (or drag it here)";
 "Too many wrong passwords. New connections are refused for 5 minutes." = "Too many wrong passwords. New connections are refused for 5 minutes.";
+"Program: %@" = "Program: %@";
+"Unknown" = "Unknown";

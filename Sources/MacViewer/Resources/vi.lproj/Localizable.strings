@@ -504,3 +504,5 @@
 "Messages and files appear here. Drag files onto the chat to send them." = "Tin nhắn và tệp sẽ hiện ở đây. Kéo tệp vào khung chat để gửi.";
 "Send a file (or drag it here)" = "Gửi tệp (hoặc kéo tệp vào đây)";
 "Too many wrong passwords. New connections are refused for 5 minutes." = "Nhập sai mật khẩu quá nhiều lần. Tạm từ chối kết nối mới trong 5 phút.";
+"Program: %@" = "Chương trình: %@";
+"Unknown" = "Không rõ";
