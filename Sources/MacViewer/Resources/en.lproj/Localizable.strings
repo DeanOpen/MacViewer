@@ -498,3 +498,5 @@
 "Clipboard off" = "Clipboard off";
 "Turn On" = "Turn On";
 "Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Clipboard sharing is off. Text copied on one computer can't be pasted on the other.";
+"Program: %@" = "Program: %@";
+"Unknown" = "Unknown";

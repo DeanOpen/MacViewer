@@ -3,8 +3,14 @@ import Foundation
 struct MCPClientInfo: Equatable, Sendable {
     var name: String
     var version: String?
+    /// The agent's executable, found from the connection rather than reported by the agent.
+    var program: String? = nil
 
     static let unknown = MCPClientInfo(name: "AI agent", version: nil)
+
+    /// Approvals are remembered per name and program, so another program
+    /// cannot reuse a trusted agent's name.
+    var trustKey: String { "\(name) (\(program ?? "unknown program"))" }
 }
 
 struct MCPToolResult: Equatable, Sendable {
@@ -32,7 +38,10 @@ final class MCPSession {
     private weak var host: (any MCPToolHost)?
     private(set) var client = MCPClientInfo.unknown
 
-    init(host: any MCPToolHost) { self.host = host }
+    init(host: any MCPToolHost, program: String? = nil) {
+        self.host = host
+        client.program = program
+    }
 
     /// Returns the response line (without a newline), or nil for notifications.
     func handle(_ line: String) async -> String? {
@@ -49,7 +58,8 @@ final class MCPSession {
         switch method {
         case "initialize":
             if let info = params["clientInfo"], let name = info["name"]?.stringValue, !name.isEmpty {
-                client = MCPClientInfo(name: info["title"]?.stringValue ?? name, version: info["version"]?.stringValue)
+                client = MCPClientInfo(name: info["title"]?.stringValue ?? name, version: info["version"]?.stringValue,
+                                       program: client.program)
             }
             let requested = params["protocolVersion"]?.stringValue ?? ""
             let version = Self.supportedProtocolVersions.contains(requested) ? requested : Self.supportedProtocolVersions[0]

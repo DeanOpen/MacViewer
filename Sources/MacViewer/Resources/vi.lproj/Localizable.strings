@@ -498,3 +498,5 @@
 "Clipboard off" = "Bảng nhớ tạm: tắt";
 "Turn On" = "Bật";
 "Clipboard sharing is off. Text copied on one computer can't be pasted on the other." = "Đang tắt chia sẻ bảng nhớ tạm. Chữ copy ở máy này sẽ không dán được ở máy kia.";
+"Program: %@" = "Chương trình: %@";
+"Unknown" = "Không rõ";

@@ -28,7 +28,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
     enum Approval { case once, always, deny }
     struct PendingApproval: Identifiable, Equatable {
         let id = UUID()
-        let client: String
+        let client: MCPClientInfo
     }
 
     @Published var isEnabled: Bool { didSet { defaults.set(isEnabled, forKey: Self.enabledKey); applyEnabled() } }
@@ -55,7 +55,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
     private var approvedThisRun: Set<String> = []
     private var deniedThisRun: Set<String> = []
     private var approvalWaiters: [CheckedContinuation<Approval, Never>] = []
-    private var approvalQueue: [String] = []
+    private var approvalQueue: [MCPClientInfo] = []
     private var actingTask: Task<Void, Never>?
     private var phaseObserver: AnyCancellable?
     /// Screenshot pixels per remote pixel for the latest screenshot.
@@ -65,7 +65,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         self.model = model
         self.defaults = defaults
         self.server = server
-        defaults.register(defaults: [Self.enabledKey: false, Self.allowScreenKey: true, Self.allowInputKey: true,
+        defaults.register(defaults: [Self.enabledKey: false, Self.allowScreenKey: true, Self.allowInputKey: false,
                                      Self.allowConnectKey: false, Self.askFirstKey: true])
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         allowScreen = defaults.bool(forKey: Self.allowScreenKey)
@@ -73,7 +73,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         allowConnect = defaults.bool(forKey: Self.allowConnectKey)
         askFirst = defaults.bool(forKey: Self.askFirstKey)
         trustedClients = defaults.stringArray(forKey: Self.trustedClientsKey) ?? []
-        server.onConnect = { [weak self] id in Task { @MainActor in self?.opened(id) } }
+        server.onConnect = { [weak self] id, program in Task { @MainActor in self?.opened(id, program: program) } }
         server.onLine = { [weak self] id, line in Task { @MainActor in self?.queues[id]?.yield(line) } }
         server.onClose = { [weak self] id in Task { @MainActor in self?.closed(id) } }
         phaseObserver = model.$phase.sink { [weak self] phase in
@@ -105,9 +105,9 @@ final class AgentBridge: ObservableObject, MCPToolHost {
 
     // MARK: Connections
 
-    private func opened(_ id: MCPSocketServer.ConnectionID) {
+    private func opened(_ id: MCPSocketServer.ConnectionID, program: String?) {
         guard isEnabled else { server.disconnect(id); return }
-        let session = MCPSession(host: self)
+        let session = MCPSession(host: self, program: program)
         sessions[id] = session
         connectedClients[id] = MCPClientInfo.unknown.name
         let (stream, continuation) = AsyncStream<String>.makeStream()
@@ -147,15 +147,16 @@ final class AgentBridge: ObservableObject, MCPToolHost {
 
     func resolveApproval(_ decision: Approval) {
         guard let pending = pendingApproval else { return }
+        let key = pending.client.trustKey
         switch decision {
-        case .once: approvedThisRun.insert(pending.client)
+        case .once: approvedThisRun.insert(key)
         case .always:
-            approvedThisRun.insert(pending.client)
-            if !trustedClients.contains(pending.client) {
-                trustedClients.append(pending.client)
+            approvedThisRun.insert(key)
+            if !trustedClients.contains(key) {
+                trustedClients.append(key)
                 defaults.set(trustedClients, forKey: Self.trustedClientsKey)
             }
-        case .deny: deniedThisRun.insert(pending.client)
+        case .deny: deniedThisRun.insert(key)
         }
         pendingApproval = nil
         let waiter = approvalWaiters.removeFirst()
@@ -164,10 +165,11 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         if let next = approvalQueue.first { pendingApproval = PendingApproval(client: next) }
     }
 
-    private func isApproved(_ client: String) async -> Bool {
+    private func isApproved(_ client: MCPClientInfo) async -> Bool {
         guard askFirst else { return true }
-        if approvedThisRun.contains(client) || trustedClients.contains(client) { return true }
-        if deniedThisRun.contains(client) { return false }
+        let key = client.trustKey
+        if approvedThisRun.contains(key) || trustedClients.contains(key) { return true }
+        if deniedThisRun.contains(key) { return false }
         let decision = await withCheckedContinuation { continuation in
             approvalWaiters.append(continuation)
             approvalQueue.append(client)
@@ -181,7 +183,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
 
     func callTool(_ name: String, arguments: JSONValue, client: MCPClientInfo) async -> MCPToolResult {
         guard isEnabled else { return .error("AI agents are turned off in MacViewer › Settings › AI Agents.") }
-        guard await isApproved(client.name) else {
+        guard await isApproved(client) else {
             return .error("The MacViewer user declined access for \(client.name).")
         }
         let result = await run(name, arguments)
