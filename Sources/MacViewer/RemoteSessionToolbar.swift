@@ -186,8 +186,9 @@ struct RemoteSessionToolbar: View {
                 menu.toggle("Computer audio", isOn: callbacks.computerAudioEnabled,
                             enabled: !callbacks.isChangingAudio && isConnected, action: setAudio)
                 menu.picker("Audio volume",
-                            options: [(L("Mute"), 0.0)] + [0.25, 0.5, 0.75, 1.0].map { ("\(Int($0 * 100))%", $0) },
-                            selection: audioVolume, enabled: callbacks.computerAudioEnabled) { audioVolume = $0 }
+                            options: RemoteAudioPlayer.volumeLevels.map { ("\(Int($0 * 100))%", $0) },
+                            selection: RemoteAudioPlayer.volumeLevel(audioVolume),
+                            enabled: callbacks.computerAudioEnabled && !callbacks.isChangingAudio && isConnected) { audioVolume = $0 }
             }
             if let setQuality = callbacks.setImageQuality {
                 menu.separator()

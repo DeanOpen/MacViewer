@@ -64,3 +64,4 @@ venv/
 .idea/
 *.swp
 *~
+linux-viewer/

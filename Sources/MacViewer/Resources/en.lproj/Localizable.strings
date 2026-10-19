@@ -113,7 +113,6 @@
 "Show remote cursor" = "Show remote cursor";
 "Computer audio" = "Computer audio";
 "Audio volume" = "Audio volume";
-"Mute" = "Mute";
 "Automatic" = "Automatic";
 "Prefer speed" = "Prefer speed";
 "Prefer image quality" = "Prefer image quality";
@@ -211,6 +210,7 @@
 "Remote control paused. Check Accessibility permission." = "Remote control paused. Check Accessibility permission.";
 "Remote control is paused because a required macOS permission is unavailable." = "Remote control is paused because a required macOS permission is unavailable.";
 "The UltraViewer relay did not respond. Check the connection and try again." = "The UltraViewer relay did not respond. Check the connection and try again.";
+"The UltraViewer relay assigned to this session has an invalid or expired security certificate. Try again later." = "The UltraViewer relay assigned to this session has an invalid or expired security certificate. Try again later.";
 "Incoming" = "Incoming";
 "Outgoing" = "Outgoing";
 "Connected to %@." = "Connected to %@.";

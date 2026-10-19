@@ -109,7 +109,7 @@ final class ConnectionModel: ObservableObject {
         self.adapter = adapter
         self.defaults = defaults
         self.credentials = credentials ?? KeychainPartnerCredentialStore()
-        self.audioPlayer = audioPlayer ?? RemoteAudioPlayer()
+        self.audioPlayer = audioPlayer ?? RemoteAudioPlayer(defaults: defaults)
         self.inputBufferCapacity = inputBufferCapacity
         defaults.register(defaults: [Self.rememberPartnersKey: true, Self.rememberPasswordKey: true])
         rememberPassword = defaults.bool(forKey: Self.rememberPasswordKey)
@@ -301,6 +301,7 @@ final class ConnectionModel: ObservableObject {
     }
 
     func setComputerAudioEnabled(_ enabled: Bool) {
+        guard phase == .connected else { return }
         defaults.set(enabled, forKey: Self.computerAudioKey)
         requestAudio(enabled, clearError: true)
     }
@@ -337,6 +338,7 @@ final class ConnectionModel: ObservableObject {
                 computerAudioEnabled = false
                 errorMessage = "Computer audio stopped: \(error.localizedDescription)"
                 if wanted {
+                    defaults.set(false, forKey: Self.computerAudioKey)
                     // One serialized disable after a failed enable also covers
                     // a local output-device failure after the wire enable sent.
                     desiredAudioEnabled = false
@@ -355,6 +357,7 @@ final class ConnectionModel: ObservableObject {
         audioPlayer.stop()
         computerAudioEnabled = false
         errorMessage = "Computer audio stopped: \(error.localizedDescription)"
+        defaults.set(false, forKey: Self.computerAudioKey)
         requestAudio(false, clearError: false)
     }
 
