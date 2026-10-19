@@ -65,7 +65,7 @@ struct MacViewerSettings: View {
     @AppStorage("MacViewer.scrollSensitivity") private var scrollSensitivity = 1.0
     @AppStorage(AppLanguage.defaultsKey) private var language = AppLanguage.system.rawValue
     @AppStorage(UpdateChecker.automaticKey) private var checkForUpdates = true
-    @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = true
+    @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = false
     @AppStorage(MacRegistrationProfile.displayNameKey) private var displayName = ""
     @AppStorage(ReceivedFilesFolder.key) private var receivedFolder = ""
 

@@ -82,6 +82,22 @@ struct FileTransferEngine {
             try? file.handle?.close()
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
+        // Received files come from another computer, so Gatekeeper must check
+        // them on first open. The value matches what macOS writes for a
+        // quarantined download. Volumes without extended attributes cannot
+        // hold the flag; saving there still works.
+        let quarantine = String(format: "0081;%08x;MacViewer;", UInt32(truncatingIfNeeded: Int(Date().timeIntervalSince1970)))
+        guard quarantine.withCString({
+            Darwin.fsetxattr(descriptor, "com.apple.quarantine", $0, strlen($0), 0, 0)
+        }) == 0 || errno == ENOTSUP else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            try? file.handle?.close()
+            var created = stat()
+            if Darwin.lstat(destination.path, &created) == 0, FileIdentity(created) == FileIdentity(info) {
+                try? FileManager.default.removeItem(at: destination)
+            }
+            throw POSIXError(code)
+        }
         file.destination = destination
         file.identity = FileIdentity(info)
         incoming[id] = file
