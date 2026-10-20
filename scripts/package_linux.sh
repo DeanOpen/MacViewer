@@ -72,7 +72,7 @@ Priority: optional
 Architecture: ${deb_arch}
 Maintainer: DeanOpen <279508589+DeanOpen@users.noreply.github.com>
 Installed-Size: ${installed_kb}
-Depends: libc6, libgcc-s1, libasound2, libpipewire-0.3-0
+Depends: libc6, libgcc-s1, libpipewire-0.3-0, libasound2t64 | libasound2
 Recommends: libx11-6, libxcb1, libxkbcommon0, libwayland-client0, xdg-desktop-portal
 Description: UltraViewer-compatible remote desktop for Linux
  LinuxViewer connects to and controls UltraViewer machines, and can share an
