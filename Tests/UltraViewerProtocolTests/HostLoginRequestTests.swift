@@ -78,3 +78,18 @@ private func hostLoginFixture(_ change: ((inout [String]) -> Void)? = nil) -> Da
         try HostLoginRequest.decode(Data(String(repeating: ":", count: 8_000).utf8))
     }
 }
+
+@Test func hostLoginAcceptsTheStoredCustomPasswordProofFromField13() throws {
+    // Public synthetic fixture: Python hashlib.md5(b" " * 32 + b"test-pass").hexdigest().
+    let proof = try HostLoginRequest.customPasswordProof(for: "test-pass")
+    #expect(proof == "85347ba7a403ffed52d311b7c5b6b549")
+    let login = try HostLoginRequest.decode(hostLoginFixture { $0[2] = String(repeating: "0", count: 32) })
+    #expect(try !login.verify(randomPassword: "test-pass"))
+    #expect(login.verify(customPasswordProof: proof))
+    #expect(!login.verify(customPasswordProof: try HostLoginRequest.customPasswordProof(for: "other-pass")))
+    #expect(!login.verify(customPasswordProof: ""))
+    #expect(!login.verify(customPasswordProof: proof.uppercased()))
+    #expect(throws: HostLoginRequest.Error.invalidConfiguredPassword) {
+        try HostLoginRequest.customPasswordProof(for: "")
+    }
+}

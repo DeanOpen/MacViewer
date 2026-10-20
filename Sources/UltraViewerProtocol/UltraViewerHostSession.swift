@@ -17,6 +17,8 @@ public actor UltraViewerHostSession {
         /// The peer's claim, not an independently verified account identity.
         public let viewerID: String
         public let displayName: String?
+        /// The viewer proved the master password rather than the random one.
+        public let usedMasterPassword: Bool
     }
     /// A local confirmation token. Credentials stay inside the session until
     /// this exact request has been approved and its acknowledgment was sent.
@@ -408,9 +410,13 @@ public actor UltraViewerHostSession {
         if payload.starts(with: Data("login:".utf8)) {
             diagnostics.loginAttempts += 1
             let now = Date()
-            guard !loginThrottle.isLocked(at: now), let config = configuration,
-                  let login = try? HostLoginRequest.decode(payload),
-                  (try? login.verify(randomPassword: config.registration.password)) == true else {
+            let login = loginThrottle.isLocked(at: now) ? nil : try? HostLoginRequest.decode(payload)
+            let registration = configuration?.registration
+            let usedRandomPassword = registration.map { (try? login?.verify(randomPassword: $0.password)) == true } ?? false
+            // The master password is checked only when the random one fails, as on Windows.
+            let usedMasterPassword = !usedRandomPassword
+                && registration.map { login?.verify(customPasswordProof: $0.customPassword) == true } ?? false
+            guard let login, usedRandomPassword || usedMasterPassword else {
                 let startsLockout = loginThrottle.recordFailure(at: now)
                 try await send(try MultipartPayload.encode([Data([22])]), route: route)
                 if startsLockout {
@@ -438,7 +444,8 @@ public actor UltraViewerHostSession {
             }
             let name = String(login.displayName.prefix(50))
             let request = IncomingRequest(id: UUID(), viewerID: login.claimedID,
-                                          displayName: name.isEmpty ? nil : name)
+                                          displayName: name.isEmpty ? nil : name,
+                                          usedMasterPassword: usedMasterPassword)
             peer = Peer(request: request, login: login, route: route)
             peerPhase = .approval
             try emit(.request(request))

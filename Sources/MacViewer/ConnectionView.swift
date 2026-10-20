@@ -36,7 +36,8 @@ struct ConnectionView: View {
             else { appHeader; Divider(); dashboard }
         }
         .background(Color(NSColor.windowBackgroundColor))
-        .sheet(isPresented: Binding(get: { hosting.pendingRequest != nil }, set: { if !$0 { hosting.decline() } })) {
+        .sheet(isPresented: Binding(get: { hosting.pendingRequest != nil && !hosting.isAutoApproving },
+                                     set: { if !$0 { hosting.decline() } })) {
             IncomingMacConnectionView(hosting: hosting)
         }
         .onAppear {
@@ -758,6 +759,10 @@ private struct IncomingMacConnectionView: View {
             if let request = hosting.pendingRequest {
                 Text("\(request.displayName ?? L("Another computer")) wants to access this Mac.")
                 Text("Partner ID: \(request.viewerID)").font(.system(.callout, design: .monospaced)).foregroundColor(.secondary)
+                if request.usedMasterPassword {
+                    Label("Connected with the master password", systemImage: "key.fill")
+                        .font(.callout).foregroundColor(.secondary)
+                }
             }
             Text("Allow viewing to share your screen. Allow control also gives access to your mouse and keyboard.")
                 .foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)

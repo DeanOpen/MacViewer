@@ -3,7 +3,7 @@ import Foundation
 
 /// The ASCII `login:` application payload received by frmMain.ManipulatePacket
 /// at 0x64c280. Claims remain untrusted until password verification and local
-/// approval. This implements only the ordinary random-password branch.
+/// approval. This implements the random-password and custom-password branches.
 public struct HostLoginRequest: Sendable, Equatable {
     public enum Error: Swift.Error, Equatable {
         case payloadTooLarge
@@ -85,6 +85,31 @@ public struct HostLoginRequest: Sendable, Equatable {
         var difference: UInt8 = 0
         // Both operands are exactly 32 ASCII bytes. No early mismatch return.
         for (actual, expected) in zip(fields[2].utf8, expected.utf8) {
+            difference |= actual ^ expected
+        }
+        return difference == 0
+    }
+
+    /// The stored CustomPassword form, lowercase MD5(ASCII(Space(32) + password)).
+    /// The host keeps only this value and registers it with UltraViewer, so the
+    /// server can match a viewer's lookup proof against it.
+    public static func customPasswordProof(for password: String) throws -> String {
+        guard !password.isEmpty, password.utf8.count <= 256,
+              password.utf8.allSatisfy({ (32...126).contains($0) }) else {
+            throw Error.invalidConfiguredPassword
+        }
+        return Insecure.MD5.hash(data: Data((String(repeating: " ", count: 32) + password).utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Checks field13 == the stored CustomPassword proof, as at 0x64cc88. The
+    /// original compares the value directly; it does not involve the nonce.
+    public func verify(customPasswordProof proof: String) -> Bool {
+        guard proof.utf8.count == 32,
+              proof.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+              fields[13].utf8.count == 32 else { return false }
+        var difference: UInt8 = 0
+        for (actual, expected) in zip(fields[13].utf8, proof.utf8) {
             difference |= actual ^ expected
         }
         return difference == 0

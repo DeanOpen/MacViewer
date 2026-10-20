@@ -121,3 +121,29 @@ import UltraViewerProtocol
     // The new identity is what later launches load.
     #expect(try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment).deviceIdentity == renewed.deviceIdentity)
 }
+
+@Test func macRegistrationProfileStoresOnlyTheMasterPasswordProof() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("MacViewer-master-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    #expect(try MacRegistrationProfile.masterPasswordProof(in: directory).isEmpty)
+    #expect(throws: HostLoginRequest.Error.invalidConfiguredPassword) {
+        try MacRegistrationProfile.setMasterPassword("short", in: directory)
+    }
+    try MacRegistrationProfile.setMasterPassword("test-pass", in: directory)
+    let proof = try MacRegistrationProfile.masterPasswordProof(in: directory)
+    #expect(proof == "85347ba7a403ffed52d311b7c5b6b549")
+    let file = directory.appendingPathComponent("master-password")
+    #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("test-pass"))
+    let permissions = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber
+    #expect(permissions?.intValue == 0o600)
+    let environment = MacRegistrationProfile.Environment(
+        network: .init(address: try RelayIPv4Address("192.0.2.5"), macAddress: "020000000001"),
+        hostName: "Mac", userName: "dean", operatingSystem: .init(majorVersion: 26, minorVersion: 0, patchVersion: 0))
+    let request = try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment, masterPasswordProof: proof)
+    #expect(request.customPassword == proof)
+    #expect(try request.text().split(separator: ":", omittingEmptySubsequences: false)[13] == Substring(proof))
+    try MacRegistrationProfile.setMasterPassword(nil, in: directory)
+    #expect(try MacRegistrationProfile.masterPasswordProof(in: directory).isEmpty)
+    #expect(try MacRegistrationProfile.loadOrCreate(in: directory, environment: environment).customPassword.isEmpty)
+}

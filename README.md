@@ -67,6 +67,8 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 - Quyền xem và quyền điều khiển được duyệt riêng. Bạn có thể ngắt kết nối hoặc
   tạm khóa truy cập bất cứ lúc nào
 - Sao chép hoặc **tạo mật khẩu mới** cho máy Mac; ID giữ nguyên
+- Đặt **mật khẩu chủ** cố định trong Cài đặt, có thể cho phép kết nối bằng mật khẩu này
+  mà không cần bấm đồng ý
 - Đặt **tên hiển thị** cho máy Mac trong Cài đặt (chữ không dấu, tối đa 20 ký tự)
 - Gửi và nhận file trong chat của phiên truy cập vào Mac, có nút lưu, hủy và
   tiến trình truyền như khi Mac điều khiển máy khác

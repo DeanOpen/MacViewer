@@ -70,6 +70,8 @@ Windows executable code.
 - You approve viewing or control separately. You can end a session or pause
   incoming access at any time.
 - Copy the Mac's password or **make a new one**; the ID stays the same
+- Set a fixed **master password** in Settings, optionally accepted without
+  asking
 - Set this Mac's **display name** in Settings (unaccented letters, up to 20)
 - Send and receive files from the incoming session's chat, with the same
   save, progress and cancel controls as an outgoing session

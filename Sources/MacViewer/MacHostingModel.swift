@@ -21,6 +21,9 @@ final class MacHostingModel: ObservableObject {
     @Published private(set) var permissions = MacHostingPermissions.refresh()
     @Published private(set) var displays: [MacSharingDisplay] = []
     @Published private(set) var selectedDisplayKey = MacDisplayLayout.allDisplaysKey
+    @Published private(set) var hasMasterPassword = MacRegistrationProfile.hasMasterPassword()
+    /// A master-password request is being accepted without showing the prompt.
+    @Published private(set) var isAutoApproving = false
 
     /// Invoked only after this Mac's user approves and54 is acknowledged. The
     /// PIN is transient; the outgoing connection must not save it in history.
@@ -44,6 +47,8 @@ final class MacHostingModel: ObservableObject {
     private var displayRevision = UUID()
     private var capturedDisplayRevision: UUID?
     static let displaySelectionKey = "MacViewer.hostDisplaySelection"
+    static let masterPasswordAutoAcceptKey = "MacViewer.masterPasswordAutoAccept"
+    static let autoAcceptAllKey = "MacViewer.autoAcceptAllConnections"
 
     init(defaults: UserDefaults = .standard,
          displayProvider: @escaping @MainActor () -> [MacSharingDisplay] = MacSharingDisplay.current) {
@@ -117,12 +122,29 @@ final class MacHostingModel: ObservableObject {
                         status = "Waiting for a Windows computer to connect."
                     case let .request(request):
                         cancelSideSwitch()
+                        // A new request replaces any earlier one. Drop its
+                        // in-flight approval so this prompt is never hidden or
+                        // left with disabled buttons.
+                        captureGeneration = UUID()
+                        captureTask?.cancel(); captureTask = nil
+                        isApproving = false; isAutoApproving = false; allowsControl = false
                         pendingRequest = request; phase = .awaitingApproval
                         status = "An incoming connection needs your approval."
+                        if defaults.bool(forKey: Self.autoAcceptAllKey)
+                            || (request.usedMasterPassword && defaults.bool(forKey: Self.masterPasswordAutoAcceptKey)) {
+                            refreshPermissions()
+                            if canView {
+                                isAutoApproving = true
+                                approve(control: canControl)
+                                // Show the prompt if approval could not start.
+                                if !isApproving { isAutoApproving = false }
+                            }
+                        }
                     case let .connected(request):
                         cancelSideSwitch()
                         let newViewer = viewer?.id != request.id
-                        viewer = request; pendingRequest = nil; isApproving = false; isEndingViewer = false; phase = .sharing
+                        viewer = request; pendingRequest = nil; isApproving = false; isAutoApproving = false
+                        isEndingViewer = false; phase = .sharing
                         input.setGeometry(capturedDisplayRevision == displayRevision ? capture.geometry : nil)
                         status = allowsControl ? "Your Mac is being viewed and controlled." : "Your Mac is being viewed."
                         if newViewer { activateTools(session: session, viewerID: request.id, token: token) }
@@ -177,7 +199,7 @@ final class MacHostingModel: ObservableObject {
                         captureGeneration = UUID()
                         captureTask?.cancel(); captureTask = nil
                         input.releaseAll(); viewer = nil; pendingRequest = nil
-                        allowsControl = false; isApproving = false; phase = .ready
+                        allowsControl = false; isApproving = false; isAutoApproving = false; phase = .ready
                         status = reason ?? "The Windows computer disconnected."
                     }
                 }
@@ -190,7 +212,7 @@ final class MacHostingModel: ObservableObject {
                 cancelControlUpdate(); isEndingViewer = false
                 input.releaseAll(); captureTask?.cancel(); captureGeneration = UUID()
                 phase = .failed; identifier = nil; pendingRequest = nil; viewer = nil
-                allowsControl = false; isApproving = false
+                allowsControl = false; isApproving = false; isAutoApproving = false
                 errorMessage = connectionErrorText(error)
                 status = "This Mac is unavailable for incoming connections."
                 let failed = engine; engine = nil
@@ -218,10 +240,11 @@ final class MacHostingModel: ObservableObject {
                 allowsControl = control
                 try await session.approve(request.id, firstFrame: frame, allowsControl: control)
             } catch is CancellationError {
+                if generation == token, pendingRequest?.id == request.id { isAutoApproving = false }
             } catch {
                 guard generation == token, captureGeneration == captureToken,
                       pendingRequest?.id == request.id else { return }
-                isApproving = false; allowsControl = false; input.releaseAll()
+                isApproving = false; isAutoApproving = false; allowsControl = false; input.releaseAll()
                 errorMessage = error.localizedDescription
             }
         }
@@ -229,7 +252,7 @@ final class MacHostingModel: ObservableObject {
 
     func decline() {
         guard let request = pendingRequest, let session = engine else { return }
-        pendingRequest = nil; isApproving = false; allowsControl = false
+        pendingRequest = nil; isApproving = false; isAutoApproving = false; allowsControl = false
         captureGeneration = UUID()
         captureTask?.cancel(); captureTask = nil; input.releaseAll()
         Task { await session.decline(request.id) }
@@ -356,7 +379,7 @@ final class MacHostingModel: ObservableObject {
         input.releaseAll(); capture.reset()
         let session = engine; engine = nil
         phase = .off; identifier = nil; password = ""
-        pendingRequest = nil; viewer = nil; allowsControl = false; isApproving = false
+        pendingRequest = nil; viewer = nil; allowsControl = false; isApproving = false; isAutoApproving = false
         status = "Incoming access is paused."
         let previous = stopping
         stopping = Task {
@@ -376,12 +399,30 @@ final class MacHostingModel: ObservableObject {
         if wasRunning { stop() }
         do { _ = try MacRegistrationProfile.loadOrCreate(forHosting: true, regeneratePassword: true) }
         catch { errorMessage = "A new password could not be created: \(error.localizedDescription)"; return }
-        if wasRunning {
-            let previous = stopping
-            Task { [weak self] in
-                await previous?.value
-                self?.start()
-            }
+        if wasRunning { restartAfterStopping() }
+    }
+
+    /// Sets, changes or (with nil) removes the master password. Sharing that
+    /// was on restarts so UltraViewer learns it. Returns false on failure.
+    @discardableResult
+    func setMasterPassword(_ newPassword: String?) -> Bool {
+        guard canResetPassword else { return false }
+        // A running session keeps the registration it started with until restarted.
+        do { try MacRegistrationProfile.setMasterPassword(newPassword) }
+        catch {
+            errorMessage = "The master password could not be saved: \(error.localizedDescription)"
+            return false
+        }
+        hasMasterPassword = newPassword != nil
+        if isRunning { stop(); restartAfterStopping() }
+        return true
+    }
+
+    private func restartAfterStopping() {
+        let previous = stopping
+        Task { [weak self] in
+            await previous?.value
+            self?.start()
         }
     }
 
@@ -397,13 +438,7 @@ final class MacHostingModel: ObservableObject {
         } catch {
             errorMessage = "A new ID could not be created: \(error.localizedDescription)"; return
         }
-        if wasRunning {
-            let previous = stopping
-            Task { [weak self] in
-                await previous?.value
-                self?.start()
-            }
-        }
+        if wasRunning { restartAfterStopping() }
     }
 
     /// Stops sharing and waits until a connected viewer has been told.

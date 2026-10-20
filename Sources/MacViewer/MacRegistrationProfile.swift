@@ -59,24 +59,31 @@ enum MacRegistrationProfile {
 
     static func loadOrCreate(forHosting: Bool = false, regeneratePassword: Bool = false,
                              regenerateIdentity: Bool = false) throws -> ClientRegistration.Request {
+        let directory = try profileDirectory(forHosting: forHosting)
+        let process = ProcessInfo.processInfo
+        let environment = Environment(network: try discoverNetwork(), hostName: customDisplayName() ?? process.hostName,
+                                      userName: NSUserName(), operatingSystem: process.operatingSystemVersion)
+        // Only the host registers the master password; outgoing connections never do.
+        return try loadOrCreate(in: directory, environment: environment, regeneratePassword: regeneratePassword,
+                                regenerateIdentity: regenerateIdentity,
+                                masterPasswordProof: forHosting ? masterPasswordProof(in: directory) : "")
+    }
+
+    private static func profileDirectory(forHosting: Bool) throws -> URL {
         guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
                                                      in: .userDomainMask).first else {
             throw ProfileError.invalidStorageLocation
         }
-        let directory = support.appendingPathComponent("MacViewer", isDirectory: true)
+        return support.appendingPathComponent("MacViewer", isDirectory: true)
             .appendingPathComponent(forHosting ? "Host" : "Client", isDirectory: true)
-        let process = ProcessInfo.processInfo
-        let environment = Environment(network: try discoverNetwork(), hostName: customDisplayName() ?? process.hostName,
-                                      userName: NSUserName(), operatingSystem: process.operatingSystemVersion)
-        return try loadOrCreate(in: directory, environment: environment, regeneratePassword: regeneratePassword,
-                                regenerateIdentity: regenerateIdentity)
     }
 
     /// Injected location/platform values keep tests away from the user's profile.
     /// A new device identity makes UltraViewer assign a new ID, with a new password.
     static func loadOrCreate(in directory: URL, environment: Environment,
                              regeneratePassword: Bool = false,
-                             regenerateIdentity: Bool = false) throws -> ClientRegistration.Request {
+                             regenerateIdentity: Bool = false,
+                             masterPasswordProof: String = "") throws -> ClientRegistration.Request {
         storageLock.lock()
         defer { storageLock.unlock() }
         let manager = FileManager.default
@@ -113,7 +120,8 @@ enum MacRegistrationProfile {
         } else {
             credentials = Credentials(deviceIdentity: deviceIdentity(for: UUID()), password: newPassword())
         }
-        let request = makeRequest(credentials: credentials, environment: environment)
+        var request = makeRequest(credentials: credentials, environment: environment)
+        request.customPassword = masterPasswordProof
         // Check the real codec's field/encoding constraints before persistence.
         _ = try request.encode()
         let encoder = JSONEncoder()
@@ -124,6 +132,66 @@ enum MacRegistrationProfile {
         try bytes.write(to: destination, options: .atomic)
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
         return request
+    }
+
+    // MARK: Master password
+
+    /// A fixed password that keeps working while the random one changes, like
+    /// UltraViewer's custom password. Only its MD5 proof is stored, in its own
+    /// file, so it can be changed without a network connection.
+    static let minimumMasterPasswordLength = 8
+    static let maximumMasterPasswordLength = 64
+    private static let masterPasswordFile = "master-password"
+
+    static func isValidMasterPassword(_ password: String) -> Bool {
+        (minimumMasterPasswordLength...maximumMasterPasswordLength).contains(password.utf8.count)
+            && password.utf8.allSatisfy({ (32...126).contains($0) })
+    }
+
+    static func hasMasterPassword() -> Bool {
+        guard let directory = try? profileDirectory(forHosting: true) else { return false }
+        return (try? masterPasswordProof(in: directory))?.isEmpty == false
+    }
+
+    /// Nil removes the master password.
+    static func setMasterPassword(_ password: String?) throws {
+        try setMasterPassword(password, in: profileDirectory(forHosting: true))
+    }
+
+    /// Empty when no master password is set.
+    static func masterPasswordProof(in directory: URL) throws -> String {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+        let file = directory.appendingPathComponent(masterPasswordFile, isDirectory: false)
+        guard FileManager.default.fileExists(atPath: file.path) else { return "" }
+        guard try FileManager.default.attributesOfItem(atPath: file.path)[.type] as? FileAttributeType == .typeRegular else {
+            throw ProfileError.invalidStorageLocation
+        }
+        let proof = String(decoding: try Data(contentsOf: file).prefix(64), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard proof.utf8.count == 32,
+              proof.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+            throw ProfileError.invalidStoredProfile
+        }
+        return proof
+    }
+
+    static func setMasterPassword(_ password: String?, in directory: URL) throws {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+        let manager = FileManager.default
+        let file = directory.appendingPathComponent(masterPasswordFile, isDirectory: false)
+        guard let password else {
+            if manager.fileExists(atPath: file.path) { try manager.removeItem(at: file) }
+            return
+        }
+        guard isValidMasterPassword(password) else { throw HostLoginRequest.Error.invalidConfiguredPassword }
+        let proof = try HostLoginRequest.customPasswordProof(for: password)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+        try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try Data((proof + "\n").utf8).write(to: file, options: .atomic)
+        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
 
     private static func newPassword() -> String {
