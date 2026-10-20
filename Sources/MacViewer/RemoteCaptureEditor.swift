@@ -141,12 +141,12 @@ private struct RemoteCaptureEditorView: View {
                 }.pickerStyle(.segmented).frame(maxWidth: 320)
                 ForEach(RemoteCaptureEditorModel.Ink.allCases) { ink in
                     Button { model.ink = ink } label: {
-                        Circle().fill(Color(nsColor: ink.color)).frame(width: 16, height: 16)
+                        Circle().fill(Color(ink.color)).frame(width: 16, height: 16)
                             .padding(3).overlay(Circle().stroke(model.ink == ink ? Color.primary : .clear))
                     }.buttonStyle(.plain).help("Drawing color: \(String(describing: ink))")
                 }
                 Spacer(minLength: 0)
-            }.padding(10).background(.bar)
+            }.padding(10).barBackground()
             Divider()
             CaptureCanvas(model: model).frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
@@ -156,18 +156,17 @@ private struct RemoteCaptureEditorView: View {
                 Spacer()
                 if let selection = model.selection, model.canExport {
                     Text("\(Int(selection.width)) × \(Int(selection.height))")
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        .font(.caption).foregroundColor(.secondary).digitsMonospaced()
                 } else {
-                    Text("Drag over the image to select a region.").font(.caption).foregroundStyle(.secondary)
+                    Text("Drag over the image to select a region.").font(.caption).foregroundColor(.secondary)
                 }
                 Button("Save PNG…") { if let image = model.export() { onExport(image) } }
-                    .buttonStyle(.borderedProminent).disabled(!model.canExport)
-            }.padding(10).background(.bar)
+                    .prominentButton().disabled(!model.canExport)
+            }.padding(10).barBackground()
         }
-        .alert("Couldn’t create capture", isPresented: Binding(
-            get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
-                Button("OK", role: .cancel) { model.errorMessage = nil }
-            } message: { Text(model.errorMessage ?? "") }
+        .appDialog(L("Couldn’t create capture"), isPresented: Binding(
+            get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } }),
+                   message: model.errorMessage, buttons: [.cancel(L("OK")) { model.errorMessage = nil }])
     }
 }
 

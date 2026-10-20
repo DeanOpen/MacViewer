@@ -62,6 +62,16 @@ mv -f "$app_directory/Contents/MacOS/MacViewer.new" "$app_directory/Contents/Mac
 cp "$binary_directory/macviewer-mcp" "$app_directory/Contents/MacOS/macviewer-mcp.new"
 mv -f "$app_directory/Contents/MacOS/macviewer-mcp.new" "$app_directory/Contents/MacOS/macviewer-mcp"
 cp Sources/UltraViewerProtocol/Resources/8bit.dat "$app_directory/Contents/Resources/8bit.dat"
+# macOS 11 has no Swift concurrency runtime; ship the toolchain's back-deployed copy.
+if [[ "${MACVIEWER_MIN_MACOS:-12}" == "11" ]]; then
+  concurrency_library="$(dirname "$(xcrun --find swift)")/../lib/swift-5.5/macosx/libswift_Concurrency.dylib"
+  mkdir -p "$app_directory/Contents/Frameworks"
+  cp "$concurrency_library" "$app_directory/Contents/Frameworks/"
+  codesign --force --sign "$signing_identity" --timestamp=none "$app_directory/Contents/Frameworks/libswift_Concurrency.dylib"
+  for executable in MacViewer macviewer-mcp; do
+    install_name_tool -add_rpath @executable_path/../Frameworks "$app_directory/Contents/MacOS/$executable" 2>/dev/null || true
+  done
+fi
 cat > "$app_directory/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

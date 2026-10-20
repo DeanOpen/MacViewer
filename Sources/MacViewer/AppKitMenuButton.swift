@@ -21,7 +21,7 @@ struct AppKitMenuButton<Label: View>: View {
         } label: {
             HStack(spacing: 3) {
                 label()
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundColor(.secondary)
             }
         }
         .background(AppKitMenuAnchorView(anchor: anchor))

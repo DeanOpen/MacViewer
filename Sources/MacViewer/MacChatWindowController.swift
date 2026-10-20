@@ -165,15 +165,15 @@ private struct MacChatWindowView: View {
                 .help("Hide chat").accessibilityLabel("Hide chat")
             }
             .buttonStyle(.plain).font(.system(size: 11))
-            .padding(.horizontal, 9).frame(height: 34).background(.bar)
+            .padding(.horizontal, 9).frame(height: 34).barBackground()
 
             if !controller.isCollapsed {
                 Divider()
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Connected computers").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("Connected computers").font(.system(size: 10)).foregroundColor(.secondary)
                     if controller.activePeers.isEmpty {
                         Text(controller.selectedPeer.map { LF("%@ · Disconnected", $0.name) } ?? L("No connected computers"))
-                            .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                            .font(.system(size: 12)).foregroundColor(.secondary).lineLimit(1)
                     } else {
                         Picker("Computer", selection: $controller.selectedID) {
                             ForEach(controller.activePeers) { peer in
@@ -189,12 +189,12 @@ private struct MacChatWindowView: View {
                 if let peer = controller.selectedPeer {
                     SessionToolsView(tools: peer.tools, peerName: peer.name).id(peer.id)
                 } else {
-                    Text("Connect to a computer to chat.").font(.caption).foregroundStyle(.secondary)
+                    Text("Connect to a computer to chat.").font(.caption).foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .windowBackgroundColor)).ignoresSafeArea()
+        .background(Color(NSColor.windowBackgroundColor)).ignoresSafeArea()
     }
 }

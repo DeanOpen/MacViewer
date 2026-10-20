@@ -27,24 +27,24 @@ struct AgentSettingsView: View {
                 Toggle("Allow AI agents to use MacViewer", isOn: $agents.isEnabled)
                 HStack(spacing: 6) {
                     Circle().fill(statusColor).frame(width: 7, height: 7)
-                    Text(LocalizedStringKey(statusText)).font(.caption).foregroundStyle(.secondary)
+                    Text(LocalizedStringKey(statusText)).font(.caption).foregroundColor(.secondary)
                     Spacer()
                     if !agents.connectedClients.isEmpty {
                         Button("Disconnect agents", action: agents.stopAgents).controlSize(.small)
                     }
                 }
                 Text("AI apps such as Claude, Cursor or Codex can see the remote screen and use the mouse and keyboard through MCP (Model Context Protocol). Everything stays on this Mac.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
             } header: { Text("AI agents (MCP)") }
 
-            Section("Permissions") {
+            Section(header: Text("Permissions")) {
                 Toggle("Agents can see the remote screen", isOn: $agents.allowScreen)
                 Toggle("Agents can use the mouse and keyboard", isOn: $agents.allowInput)
                 Text("Only while Control is switched on in the session window.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
                 Toggle("Agents can connect and disconnect", isOn: $agents.allowConnect)
                 Text("Uses the password the agent gives, or one saved in Keychain.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
                 Toggle("Ask me before a new agent acts", isOn: $agents.askFirst)
                 if !agents.trustedClients.isEmpty {
                     ForEach(agents.trustedClients, id: \.self) { client in
@@ -70,29 +70,29 @@ struct AgentSettingsView: View {
                 }
                 if !helperExists {
                     Label("The macviewer-mcp helper is missing from this copy of MacViewer. Reinstall MacViewer.",
-                          systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                          systemImage: "exclamationmark.triangle").font(.caption).foregroundColor(.orange)
                 }
-                if let notice { Text(LocalizedStringKey(notice)).font(.caption).foregroundStyle(.green) }
+                if let notice { Text(LocalizedStringKey(notice)).font(.caption).foregroundColor(.green) }
                 Text("Restart the AI app after adding MacViewer. A backup of each changed file is saved next to it (.macviewer-backup).")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
             } header: { Text("AI apps and coding agents") }
 
             Section {
                 if agents.activity.isEmpty {
-                    Text("No agent activity yet.").font(.caption).foregroundStyle(.secondary)
+                    Text("No agent activity yet.").font(.caption).foregroundColor(.secondary)
                 } else {
                     ForEach(agents.activity) { entry in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: entry.isError ? "xmark.circle" : "checkmark.circle")
-                                .foregroundStyle(entry.isError ? .red : .green)
+                                .foregroundColor(entry.isError ? .red : .green)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(verbatim: "\(entry.client) · \(entry.tool)").font(.callout.weight(.medium))
                                 if !entry.detail.isEmpty {
-                                    Text(entry.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(entry.detail).font(.caption).foregroundColor(.secondary).lineLimit(2)
                                 }
                             }
                             Spacer()
-                            Text(entry.date, style: .time).font(.caption).foregroundStyle(.secondary)
+                            Text(entry.date, style: .time).font(.caption).foregroundColor(.secondary)
                         }
                     }
                     Button("Clear activity", action: agents.clearActivity)
@@ -101,18 +101,14 @@ struct AgentSettingsView: View {
         }
         .groupedForm()
         .onAppear(perform: refresh)
-        .confirmationDialog(confirmationTitle, isPresented: Binding(
-            get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), titleVisibility: .visible,
-            presenting: confirmation) { pending in
-                Button(pending.change == .remove ? L("Remove") : L("Add")) { apply(pending) }
-                Button("Cancel", role: .cancel) {}
-            } message: { pending in
-                Text(confirmationMessage(pending))
-            }
-        .alert("MacViewer could not update the app", isPresented: Binding(
-            get: { failure != nil }, set: { if !$0 { failure = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: { Text(failure ?? "") }
+        .appDialog(confirmationTitle, isPresented: Binding(
+            get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), confirmation: true,
+                   message: confirmation.map(confirmationMessage),
+                   buttons: confirmation.map { pending in
+                       [DialogButton(title: pending.change == .remove ? L("Remove") : L("Add")) { apply(pending) }, .cancel()]
+                   } ?? [])
+        .appDialog(L("MacViewer could not update the app"), isPresented: Binding(
+            get: { failure != nil }, set: { if !$0 { failure = nil } }), message: failure, buttons: [.cancel(L("OK"))])
     }
 
     private var statusColor: Color {
@@ -145,7 +141,7 @@ struct AgentSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(client.name)
                 Text(LocalizedStringKey(statusLabel(status)))
-                    .font(.caption).foregroundStyle(statusTint(status))
+                    .font(.caption).foregroundColor(statusTint(status))
                     .lineLimit(1).truncationMode(.middle)
                     .help(client.configPath ?? "")
             }

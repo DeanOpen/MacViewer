@@ -58,8 +58,8 @@ jobs:
           path: dist/MacViewer.zip
           retention-days: 14
 
-  # Experimental: the code still needs macOS 12, so this job reports what breaks
-  # without failing CI. Xcode 27 can't target below 12, so it uses Xcode 16.
+  # Experimental macOS 11 build; it doesn't fail CI while Big Sur support is
+  # unproven. Xcode 27 can't target below 12, so it uses Xcode 16.
   build-macos11:
     name: Build for macOS 11 (experimental)
     runs-on: macos-15
@@ -88,6 +88,8 @@ jobs:
         run: |
           scripts/package_app.sh release
           vtool -show-build dist/MacViewer.app/Contents/MacOS/MacViewer | grep -E "minos|platform"
+          otool -L dist/MacViewer.app/Contents/MacOS/MacViewer | grep -i swift_Concurrency
+          otool -l dist/MacViewer.app/Contents/MacOS/MacViewer | grep -A2 LC_RPATH | grep path
 
       - name: Zip app
         run: ditto -c -k --sequesterRsrc --keepParent dist/MacViewer.app dist/MacViewer-macOS11.zip

@@ -126,11 +126,12 @@ final class MCPSocketServer: @unchecked Sendable {
             guard let connection = self?.connections[id] else { return }
             var data = Data(line.utf8)
             data.append(0x0a)
+            let fd = connection.fd, payload = data
             connection.writer.async {
-                data.withUnsafeBytes { raw in
+                payload.withUnsafeBytes { raw in
                     var offset = 0
                     while offset < raw.count {
-                        let written = write(connection.fd, raw.baseAddress! + offset, raw.count - offset)
+                        let written = write(fd, raw.baseAddress! + offset, raw.count - offset)
                         if written > 0 { offset += written }
                         else if written < 0 && (errno == EINTR || errno == EAGAIN) { usleep(1000) }
                         else { return }
@@ -190,7 +191,8 @@ final class MCPSocketServer: @unchecked Sendable {
     private func closeConnection(_ id: ConnectionID, notify: Bool) {
         guard let connection = connections.removeValue(forKey: id) else { return }
         connection.source.cancel()
-        connection.writer.async { close(connection.fd) }
+        let fd = connection.fd
+        connection.writer.async { close(fd) }
         if notify { onClose?(id) }
     }
 }

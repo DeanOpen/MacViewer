@@ -23,7 +23,7 @@ struct ConnectionView: View {
     @State private var confirmIDReset = false
     @State private var renamingPartner: String?
     @State private var partnerNameDraft = ""
-    @FocusState private var focusedField: Field?
+    @State private var focusRequest: Field?
     @Environment(\.locale) private var appLocale
     @State private var confirmSideSwitch = false
     @State private var isSwitchingSides = false
@@ -35,32 +35,27 @@ struct ConnectionView: View {
             if showSession && model.isSessionActive { remoteSession }
             else { appHeader; Divider(); dashboard }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(NSColor.windowBackgroundColor))
         .sheet(isPresented: Binding(get: { hosting.pendingRequest != nil }, set: { if !$0 { hosting.decline() } })) {
             IncomingMacConnectionView(hosting: hosting)
         }
         .onAppear {
-            focusedField = .partner
+            focusRequest = .partner
             hosting.onApprovedSideSwitch = { id, password in
                 model.disconnect()
                 model.partnerID = id; model.password = password
                 model.connect(); showSession = true
             }
         }
-        .confirmationDialog("Switch control sides?", isPresented: $confirmSideSwitch, titleVisibility: .visible) {
-            Button("Let Windows connect to this Mac") { requestSideSwitch() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("MacViewer will share this Mac’s connection ID and password with the connected Windows computer. You will approve its incoming request here.")
-        }
-        .confirmationDialog("Windows requests a control switch", isPresented: Binding(
+        .appDialog(L("Switch control sides?"), isPresented: $confirmSideSwitch, confirmation: true,
+                   message: L("MacViewer will share this Mac’s connection ID and password with the connected Windows computer. You will approve its incoming request here."),
+                   buttons: [DialogButton(title: L("Let Windows connect to this Mac"), action: requestSideSwitch), .cancel()])
+        .appDialog(L("Windows requests a control switch"), isPresented: Binding(
             get: { hosting.pendingSideSwitch != nil },
-            set: { if !$0 { hosting.declineSideSwitch() } }), titleVisibility: .visible) {
-                Button("Connect to Windows", action: hosting.approveSideSwitch)
-                Button("Decline", role: .cancel, action: hosting.declineSideSwitch)
-            } message: {
-                Text("End this incoming session and connect to the same Windows computer? Control will stay off until you enable it.")
-            }
+            set: { if !$0 { hosting.declineSideSwitch() } }), confirmation: true,
+                   message: L("End this incoming session and connect to the same Windows computer? Control will stay off until you enable it."),
+                   buttons: [DialogButton(title: L("Connect to Windows"), action: hosting.approveSideSwitch),
+                             .cancel(L("Decline"), action: hosting.declineSideSwitch)])
         .onDisappear {
             remoteCapture.endSession(); model.disconnect(); hosting.stop()
             // An open Settings window would otherwise keep MacViewer running
@@ -89,27 +84,19 @@ struct ConnectionView: View {
             model.releaseRemoteInput()
             revealPassword = false
         }
-        .alert(updateAlertTitle, isPresented: $updater.showResult) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            if case let .failed(message) = updater.state { Text(message) }
-            else { Text("You have the latest version, \(updater.currentVersion).") }
-        }
+        .appDialog(updateAlertTitle, isPresented: $updater.showResult, message: updateAlertMessage, buttons: [.cancel(L("OK"))])
         // Hosted on a background view so it never competes with the incoming-request sheet.
         .background(EmptyView().sheet(isPresented: $updater.showSheet) {
             UpdateSheet(updater: updater, endsConnections: model.isSessionActive || hosting.viewer != nil)
                 .appLanguage()
         })
-        .alert(LF("Allow %@ to use MacViewer?", agents.pendingApproval?.client.name ?? ""), isPresented: Binding(
-            get: { agents.pendingApproval != nil }, set: { _ in })) {
-                Button("Allow once") { agents.resolveApproval(.once) }
-                Button("Always allow") { agents.resolveApproval(.always) }
-                Button("Don’t allow", role: .cancel) { agents.resolveApproval(.deny) }
-            } message: {
-                Text("An AI agent wants to use MacViewer. It can do what you allowed in Settings › AI Agents, such as seeing the remote screen and using the mouse and keyboard while Control is on.")
-                    + Text(verbatim: "\n\n")
-                    + Text(LF("Program: %@", agents.pendingApproval?.client.program ?? L("Unknown")))
-            }
+        .appDialog(LF("Allow %@ to use MacViewer?", agents.pendingApproval?.client.name ?? ""), isPresented: Binding(
+            get: { agents.pendingApproval != nil }, set: { _ in }),
+                   message: L("An AI agent wants to use MacViewer. It can do what you allowed in Settings › AI Agents, such as seeing the remote screen and using the mouse and keyboard while Control is on.")
+                       + "\n\n" + LF("Program: %@", agents.pendingApproval?.client.program ?? L("Unknown")),
+                   buttons: [DialogButton(title: L("Allow once")) { agents.resolveApproval(.once) },
+                             DialogButton(title: L("Always allow")) { agents.resolveApproval(.always) },
+                             .cancel(L("Don’t allow")) { agents.resolveApproval(.deny) }])
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             model.disconnect(); hosting.stop()
         }
@@ -120,24 +107,28 @@ struct ConnectionView: View {
         Button { updater.showSheet = true } label: {
             Label("Update to \(release.version)", systemImage: "arrow.down.circle.fill")
         }
-        .buttonStyle(.borderedProminent).controlSize(.small)
+        .prominentButton().controlSize(.small)
         .help("Install the new version and restart MacViewer")
     }
 
-    private var updateAlertTitle: LocalizedStringKey {
-        if case .failed = updater.state { "Update failed" } else { "MacViewer is up to date" }
+    private var updateAlertTitle: String {
+        if case .failed = updater.state { L("Update failed") } else { L("MacViewer is up to date") }
+    }
+
+    private var updateAlertMessage: String {
+        if case let .failed(message) = updater.state { message } else { LF("You have the latest version, %@.", updater.currentVersion) }
     }
 
     private var appHeader: some View {
         HStack(spacing: 12) {
             Image(systemName: "display.2")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundColor(.white)
                 .frame(width: 28, height: 28)
-                .background(LinearGradient(colors: [Color.blue.opacity(0.8), .blue], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 8))
+                .background(RoundedRectangle(cornerRadius: 8).fill(LinearGradient(colors: [Color.blue.opacity(0.8), .blue], startPoint: .top, endPoint: .bottom)))
             VStack(alignment: .leading, spacing: 2) {
                 Text("MacViewer").font(.system(size: 14, weight: .semibold))
-                Text("Works with UltraViewer on Windows").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("Works with UltraViewer on Windows").font(.system(size: 10)).foregroundColor(.secondary)
             }
             Spacer()
             if hosting.phase == .sharing {
@@ -150,13 +141,13 @@ struct ConnectionView: View {
                         Button("Enable Accessibility…", action: hosting.requestAccessibility)
                     }
                     Divider()
-                    Button("End incoming session", role: .destructive, action: hosting.endViewer)
+                    RoleButton("End incoming session", role: .destructive, action: hosting.endViewer)
                         .disabled(hosting.isEndingViewer)
                     Button("Pause incoming access", action: hosting.stop)
                 } label: {
                     Label(LocalizedStringKey(hosting.isEndingViewer ? "Ending incoming session…" : "Mac screen shared"),
                           systemImage: "dot.radiowaves.left.and.right")
-                        .font(.callout).foregroundStyle(.orange)
+                        .font(.callout).foregroundColor(.orange)
                 }
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Manage Windows access to this Mac")
@@ -167,7 +158,7 @@ struct ConnectionView: View {
                     .controlSize(.small)
             } else {
                 Label(LocalizedStringKey(hosting.isRunning ? "Incoming access on" : "Incoming access paused"), systemImage: "shield.lefthalf.filled")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundColor(.secondary)
             }
             if let release = updater.availableRelease { updateButton(release) }
             OpenSettingsButton { Image(systemName: "gearshape").font(.title3) }
@@ -176,7 +167,7 @@ struct ConnectionView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private var dashboard: some View {
@@ -185,7 +176,7 @@ struct ConnectionView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Connect and share").font(.system(size: 21, weight: .semibold))
                     Text("Control a Windows computer, or approve access to this Mac.")
-                        .font(.body).foregroundStyle(.secondary)
+                        .font(.body).foregroundColor(.secondary)
                 }
                 HStack(alignment: .top, spacing: 20) {
                     partnerCard
@@ -216,21 +207,21 @@ struct ConnectionView: View {
                         TextField("Windows UltraViewer ID", text: $model.partnerID)
                             .font(.system(size: 15, design: .monospaced))
                             .textFieldStyle(.roundedBorder).controlSize(.regular).frame(height: 30)
-                            .focused($focusedField, equals: .partner)
-                            .onSubmit { focusedField = .password }
+                            .focusOnRequest($focusRequest, equals: .partner)
+                            .submitAction { focusRequest = .password }
                     }
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Partner password").font(.callout.weight(.medium))
                     if model.isSessionActive {
                         Label("Password cleared", systemImage: "lock")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundColor(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                     } else {
                         SecureField("Password from Windows", text: $model.password)
                             .textFieldStyle(.roundedBorder).controlSize(.regular).frame(height: 30)
-                            .focused($focusedField, equals: .password)
-                            .onSubmit { if model.canConnect { model.connect() } }
+                            .focusOnRequest($focusRequest, equals: .password)
+                            .submitAction { if model.canConnect { model.connect() } }
                     }
                 }
                 if !model.isSessionActive {
@@ -240,21 +231,21 @@ struct ConnectionView: View {
                 }
                 Text(LocalizedStringKey(model.rememberPassword ? "Successful connection passwords are saved in macOS Keychain."
                      : "Use the current password shown in UltraViewer on Windows."))
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let message = model.credentialMessage {
-                    Text(L(message)).font(.caption).foregroundStyle(.secondary)
+                    Text(L(message)).font(.caption).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if model.isSessionActive {
                     VStack(alignment: .leading, spacing: 7) {
                         Label(LocalizedStringKey(model.phase == .connected ? "Windows is connected" : "Connecting to Windows…"),
                               systemImage: model.phase == .connected ? "checkmark.circle.fill" : "network")
-                            .font(.callout.weight(.medium)).foregroundStyle(.blue)
-                        Text(L(model.status)).font(.caption).foregroundStyle(.secondary)
+                            .font(.callout.weight(.medium)).foregroundColor(.blue)
+                        Text(L(model.status)).font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(13).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .shapeBackground(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                 }
                 if let error = model.errorMessage { errorLabel(error) }
                 Spacer(minLength: 8)
@@ -265,23 +256,23 @@ struct ConnectionView: View {
                     HStack {
                         Button { showSession = true } label: {
                             Label("Open screen", systemImage: "arrow.up.right.square").frame(maxWidth: .infinity)
-                        }.buttonStyle(.borderedProminent)
-                        Button("Disconnect", role: .destructive, action: model.disconnect).buttonStyle(.bordered)
+                        }.prominentButton()
+                        RoleButton("Disconnect", role: .destructive, action: model.disconnect).buttonStyle(.bordered)
                     }
                 } else {
                     Button(action: model.connect) {
                         Label("Connect to Windows", systemImage: "arrow.up.right").frame(maxWidth: .infinity, minHeight: 28)
-                    }.buttonStyle(.borderedProminent).disabled(!model.canConnect)
+                    }.prominentButton().disabled(!model.canConnect)
                 }
                 Text("Enable Control Windows in the remote screen to use the keyboard and mouse.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.caption).foregroundColor(.secondary).lineLimit(2)
                     .frame(height: 30, alignment: .topLeading)
             }.controlSize(.large)
         }
     }
 
     private var hostingCard: some View {
-        utilityPanel("Share this Mac", direction: "WINDOWS → MAC", symbol: "laptopcomputer", color: .teal) {
+        utilityPanel("Share this Mac", direction: "WINDOWS → MAC", symbol: "laptopcomputer", color: .systemTeal) {
             VStack(alignment: .leading, spacing: 12) {
                 if hosting.identifier != nil {
                 VStack(alignment: .leading, spacing: 7) {
@@ -290,7 +281,7 @@ struct ConnectionView: View {
                         if let id = hosting.identifier {
                             Text(formattedID(id)).font(.system(size: 23, weight: .semibold, design: .monospaced))
                                 .lineLimit(1).minimumScaleFactor(0.55).layoutPriority(1)
-                                .textSelection(.enabled).accessibilityLabel("Your UltraViewer ID: \(id)")
+                                .selectableText().accessibilityLabel("Your UltraViewer ID: \(id)")
                             Spacer(minLength: 0)
                             Button { copy(id) } label: { Image(systemName: "doc.on.doc") }
                                 .buttonStyle(.borderless).help("Copy your ID")
@@ -300,15 +291,12 @@ struct ConnectionView: View {
                         } else {
                             if hosting.phase == .registering { ProgressView().controlSize(.small) }
                             Text(LocalizedStringKey(hosting.phase == .registering ? "Getting your ID…" : "Available after starting sharing"))
-                                .font(.callout).foregroundStyle(.secondary)
+                                .font(.callout).foregroundColor(.secondary)
                         }
                     }.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                    .confirmationDialog("Get a new ID?", isPresented: $confirmIDReset, titleVisibility: .visible) {
-                        Button("New ID") { hosting.resetIdentity() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one.")
-                    }
+                    .appDialog(L("Get a new ID?"), isPresented: $confirmIDReset, confirmation: true,
+                               message: L("UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one."),
+                               buttons: [DialogButton(title: L("New ID"), action: hosting.resetIdentity), .cancel()])
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Your Mac’s password").font(.callout.weight(.medium))
@@ -328,22 +316,19 @@ struct ConnectionView: View {
                                 .help(hosting.canResetPassword ? "Make a new password" : "End the current connection to change the password")
                         } else {
                             Label("Available after starting sharing", systemImage: "lock")
-                                .font(.callout).foregroundStyle(.secondary)
+                                .font(.callout).foregroundColor(.secondary)
                         }
                     }.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                    .confirmationDialog("Make a new password?", isPresented: $confirmPasswordReset, titleVisibility: .visible) {
-                        Button("New Password") { hosting.resetPassword() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("The old password stops working. Your Mac’s ID stays the same.")
-                    }
+                    .appDialog(L("Make a new password?"), isPresented: $confirmPasswordReset, confirmation: true,
+                               message: L("The old password stops working. Your Mac’s ID stays the same."),
+                               buttons: [DialogButton(title: L("New Password"), action: hosting.resetPassword), .cancel()])
                 }
                 } else {
                     HStack(spacing: 8) {
                         if hosting.phase == .registering { ProgressView().controlSize(.small) }
                         Text(LocalizedStringKey(hosting.phase == .registering ? "Getting your ID…"
                              : "Start sharing to get this Mac’s UltraViewer ID."))
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundColor(.secondary)
                     }.frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 }
                 MacSharingDisplayPicker(hosting: hosting)
@@ -354,9 +339,9 @@ struct ConnectionView: View {
                           : hosting.identifier != nil ? "Waiting for Windows" : "Incoming access is paused"),
                           systemImage: hosting.phase == .sharing ? "dot.radiowaves.left.and.right" : "shield.lefthalf.filled")
                         .font(.callout.weight(.medium))
-                        .foregroundStyle(hosting.phase == .sharing ? Color.orange : Color.secondary)
+                        .foregroundColor(hosting.phase == .sharing ? Color.orange : Color.secondary)
                     if hosting.isRunning || hosting.phase == .failed {
-                        Text(L(hosting.status)).font(.caption).foregroundStyle(.secondary)
+                        Text(L(hosting.status)).font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if hosting.phase == .sharing {
@@ -376,7 +361,7 @@ struct ConnectionView: View {
                     HStack {
                         SessionToolsButton(tools: hosting.tools, peerName: incomingPeerName, context: "Incoming")
                             .buttonStyle(.bordered)
-                        Button("End session", role: .destructive, action: hosting.endViewer)
+                        RoleButton("End session", role: .destructive, action: hosting.endViewer)
                             .buttonStyle(.bordered).disabled(hosting.isEndingViewer)
                         Spacer(minLength: 0)
                     }
@@ -388,10 +373,10 @@ struct ConnectionView: View {
                     Button(action: hosting.start) {
                         Label(LocalizedStringKey(hosting.phase == .failed ? "Try sharing again" : "Start sharing this Mac"), systemImage: "network")
                             .frame(maxWidth: .infinity, minHeight: 28)
-                    }.buttonStyle(.borderedProminent).tint(.teal)
+                    }.prominentButton(tint: .systemTeal)
                 }
                 Text("Enter this ID and password on Windows. Screen sharing begins after your approval.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.caption).foregroundColor(.secondary).lineLimit(2)
                     .frame(height: 30, alignment: .topLeading)
             }.controlSize(.large)
         }
@@ -409,8 +394,8 @@ struct ConnectionView: View {
                 .background(Color.primary.opacity(0.025))
         }
         .frame(maxWidth: .infinity, minHeight: 420, maxHeight: .infinity, alignment: .topLeading)
-        .background(cardBackground, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.09)))
+        .shapeBackground(cardBackground, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.09)))
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -430,10 +415,10 @@ struct ConnectionView: View {
         VStack(alignment: .leading, spacing: 10) {
             if hosting.canControl {
                 HStack(spacing: 10) {
-                    Image(systemName: "checkmark.shield.fill").font(.system(size: 22)).foregroundStyle(.green)
+                    Image(systemName: "checkmark.shield.fill").font(.system(size: 22)).foregroundColor(.green)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Ready to share").font(.callout.weight(.semibold))
-                        Text("Screen and control permissions are enabled.").font(.caption).foregroundStyle(.secondary)
+                        Text("Screen and control permissions are enabled.").font(.caption).foregroundColor(.secondary)
                     }
                     Spacer(minLength: 4)
                     Button("Manage…") {
@@ -454,17 +439,17 @@ struct ConnectionView: View {
             }
         }
         .padding(12)
-        .background(hosting.canControl ? Color.green.opacity(0.055) : Color.primary.opacity(0.035),
-                    in: RoundedRectangle(cornerRadius: 10))
+        .shapeBackground(hosting.canControl ? Color.green.opacity(0.055) : Color.primary.opacity(0.035),
+                         in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func permissionSummary(_ title: String, allowed: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: allowed ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(allowed ? Color.green : Color.secondary)
+                .foregroundColor(allowed ? Color.green : Color.secondary)
             Text(LocalizedStringKey(title)).font(.callout)
             Spacer()
-            Text(LocalizedStringKey(allowed ? "Allowed" : "Required")).font(.caption).foregroundStyle(.secondary)
+            Text(LocalizedStringKey(allowed ? "Allowed" : "Required")).font(.caption).foregroundColor(.secondary)
         }
     }
 
@@ -478,7 +463,7 @@ struct ConnectionView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Recent Windows computers").font(.headline)
-                    Text("Choose a computer to reuse its connection details. Use the pencil to rename it.").font(.caption).foregroundStyle(.secondary)
+                    Text("Choose a computer to reuse its connection details. Use the pencil to rename it.").font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
                 Button("Clear history", action: model.clearRecentPartners).buttonStyle(.borderless).font(.caption)
@@ -488,25 +473,25 @@ struct ConnectionView: View {
                     HStack(spacing: 0) {
                     Button {
                         model.selectRecent(id)
-                        focusedField = .password
+                        focusRequest = .password
                     } label: {
                         HStack(spacing: 13) {
-                            Image(systemName: "pc").font(.system(size: 19)).foregroundStyle(.blue)
+                            Image(systemName: "pc").font(.system(size: 19)).foregroundColor(.blue)
                                 .frame(width: 38, height: 38)
-                                .background(Color.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                                .shapeBackground(Color.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
                             VStack(alignment: .leading, spacing: 4) {
                                 if let name = model.partnerName(id) {
-                                    Text(name).font(.system(size: 16, weight: .medium)).foregroundStyle(.primary).lineLimit(1)
-                                    Text(formattedID(id)).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                    Text(name).font(.system(size: 16, weight: .medium)).foregroundColor(.primary).lineLimit(1)
+                                    Text(formattedID(id)).font(.system(.caption, design: .monospaced)).foregroundColor(.secondary)
                                 } else {
                                     Text(formattedID(id)).font(.system(size: 16, weight: .medium, design: .monospaced))
-                                        .foregroundStyle(.primary)
-                                    Text("Windows computer").font(.caption).foregroundStyle(.secondary)
+                                        .foregroundColor(.primary)
+                                    Text("Windows computer").font(.caption).foregroundColor(.secondary)
                                 }
                             }
                             Spacer()
-                            Text("Select").font(.callout.weight(.medium)).foregroundStyle(.blue)
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            Text("Select").font(.callout.weight(.medium)).foregroundColor(.blue)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundColor(.tertiaryLabel)
                         }
                         .padding(.horizontal, 17).padding(.vertical, 13)
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
@@ -516,7 +501,7 @@ struct ConnectionView: View {
                     Button { startRenaming(id) } label: {
                         Label("Rename", systemImage: "pencil").font(.callout.weight(.medium))
                     }
-                    .buttonStyle(.bordered).tint(.blue).controlSize(.regular)
+                    .buttonStyle(.bordered).controlSize(.regular)
                     .help("Rename this computer").padding(.trailing, 12)
                     }
                     .contextMenu {
@@ -526,18 +511,16 @@ struct ConnectionView: View {
                     if id != model.recentPartners.last { Divider().padding(.leading, 68) }
                 }
             }
-            .background(cardBackground, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.08)))
+            .shapeBackground(cardBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08)))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .alert("Rename computer", isPresented: Binding(get: { renamingPartner != nil },
-                                                     set: { if !$0 { renamingPartner = nil } })) {
-            TextField("Name", text: $partnerNameDraft)
-            Button("Save") { if let id = renamingPartner { model.renamePartner(id, to: partnerNameDraft) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(LF("Shown only on this Mac for %@. Leave empty to show the ID.", formattedID(renamingPartner ?? "")))
-        }
+        .appDialog(L("Rename computer"), isPresented: Binding(get: { renamingPartner != nil },
+                                                              set: { if !$0 { renamingPartner = nil } }),
+                   message: LF("Shown only on this Mac for %@. Leave empty to show the ID.", formattedID(renamingPartner ?? "")),
+                   textField: (L("Name"), $partnerNameDraft),
+                   buttons: [DialogButton(title: L("Save")) { if let id = renamingPartner { model.renamePartner(id, to: partnerNameDraft) } },
+                             .cancel()])
     }
 
     private var unreadMessages: Int {
@@ -554,7 +537,7 @@ struct ConnectionView: View {
     private var chatSidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(.secondary)
+                Image(systemName: "bubble.left.and.bubble.right").foregroundColor(.secondary)
                 Text("Chat").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button(action: toggleChatSidebar) { Image(systemName: "chevron.right") }
@@ -564,7 +547,7 @@ struct ConnectionView: View {
             Divider()
             SessionToolsView(tools: model.tools, peerName: model.partnerName(model.partnerID) ?? model.remoteInfo?.displayName ?? model.partnerID)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     /// Slim tab on the screen edge while the chat is hidden; shows unread messages.
@@ -574,13 +557,13 @@ struct ConnectionView: View {
                 Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 12))
                 if unreadMessages > 0 {
                     Text(unreadMessages > 99 ? "99+" : String(unreadMessages))
-                        .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                        .font(.system(size: 10, weight: .bold)).digitsMonospaced()
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.red, in: Capsule()).foregroundStyle(.white)
+                        .shapeBackground(.red, in: Capsule()).foregroundColor(.white)
                 }
             }
             .padding(.vertical, 10).padding(.horizontal, 6)
-            .background(.regularMaterial, in: CornerRoundedRectangle(topLeading: 8, bottomLeading: 8))
+            .materialBackground(in: CornerRoundedRectangle(topLeading: 8, bottomLeading: 8))
             .shadow(radius: 2)
         }
         .buttonStyle(.plain)
@@ -593,7 +576,7 @@ struct ConnectionView: View {
         Button { showSessionToolbar = true } label: {
             Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
                 .frame(width: 44, height: 16)
-                .background(.regularMaterial, in: CornerRoundedRectangle(bottomLeading: 8, bottomTrailing: 8))
+                .materialBackground(in: CornerRoundedRectangle(bottomLeading: 8, bottomTrailing: 8))
                 .shadow(radius: 2)
         }
         .buttonStyle(.plain)
@@ -646,13 +629,13 @@ struct ConnectionView: View {
                     } else {
                         VStack(spacing: 16) {
                             ProgressView().controlSize(.large)
-                            Text(L(model.status)).foregroundStyle(.secondary)
+                            Text(L(model.status)).foregroundColor(.secondary)
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .top) { if !showSessionToolbar { toolbarEdgeTab } }
-                .overlay(alignment: .trailing) { if !showChatSidebar { chatEdgeTab } }
+                .overlay(Group { if !showSessionToolbar { toolbarEdgeTab } }, alignment: .top)
+                .overlay(Group { if !showChatSidebar { chatEdgeTab } }, alignment: .trailing)
                 if showChatSidebar {
                     Divider()
                     chatSidebar.frame(width: 300).transition(.move(edge: .trailing))
@@ -674,7 +657,7 @@ struct ConnectionView: View {
                 Text(L(model.status)).lineLimit(1)
                 Spacer()
                 if agents.isActing || agents.isStoppedForSession { agentBadge }
-                if let size = model.remoteScreenSize { Text("\(Int(size.width)) × \(Int(size.height))").monospacedDigit() }
+                if let size = model.remoteScreenSize { Text("\(Int(size.width)) × \(Int(size.height))").digitsMonospaced() }
                 Button {
                     model.releaseRemoteInput(); forwardShortcuts.toggle()
                 } label: {
@@ -688,7 +671,7 @@ struct ConnectionView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(model.phase != .connected || model.remoteInfo?.allowsRemoteInput != true)
-            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 5).background(.bar)
+            }.font(.caption).foregroundColor(.secondary).padding(.horizontal, 10).padding(.vertical, 5).barBackground()
         }
     }
 
@@ -703,12 +686,12 @@ struct ConnectionView: View {
                     .help("Disconnect AI agents and block their input for this session")
             }
         }
-        .foregroundStyle(.purple)
+        .foregroundColor(.purple)
         .padding(.horizontal, 8).padding(.vertical, 2)
-        .background(.purple.opacity(0.12), in: Capsule())
+        .shapeBackground(.purple.opacity(0.12), in: Capsule())
     }
 
-    private var cardBackground: Color { Color(nsColor: .controlBackgroundColor) }
+    private var cardBackground: Color { Color(NSColor.controlBackgroundColor) }
     private func formattedID(_ id: String) -> String {
         stride(from: 0, to: id.count, by: 3).map { offset in
             let start = id.index(id.startIndex, offsetBy: offset)
@@ -718,29 +701,29 @@ struct ConnectionView: View {
     private func copy(_ value: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string) }
     private func cardHeading(_ title: String, direction: String, symbol: String, color: Color) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(color)
-                 .frame(width: 36, height: 36).background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
+            Image(systemName: symbol).font(.system(size: 20)).foregroundColor(color)
+                 .frame(width: 36, height: 36).shapeBackground(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
             VStack(alignment: .leading, spacing: 4) {
-                Text(LocalizedStringKey(direction)).font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(color)
+                Text(LocalizedStringKey(direction)).font(.system(size: 10, weight: .semibold)).tracking(1).foregroundColor(color)
                 Text(LocalizedStringKey(title)).font(.headline)
             }
         }
     }
     private func permissionRow(_ name: String, detail: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         HStack(spacing: 9) {
-            Image(systemName: enabled ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(enabled ? .green : .secondary)
+            Image(systemName: enabled ? "checkmark.circle.fill" : "circle.dashed").foregroundColor(enabled ? .green : .secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(name)).font(.callout.weight(.medium))
-                Text(LocalizedStringKey(detail)).font(.caption2).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(detail)).font(.caption2).foregroundColor(.secondary)
             }
             Spacer(minLength: 4)
-            if enabled { Text("Allowed").font(.caption).foregroundStyle(.green) }
+            if enabled { Text("Allowed").font(.caption).foregroundColor(.green) }
             else { Button("Enable", action: action).buttonStyle(.bordered).controlSize(.small) }
         }
     }
     private func errorLabel(_ text: String) -> some View {
         Label(L(text), systemImage: "exclamationmark.circle.fill")
-            .font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            .font(.callout).foregroundColor(.red).fixedSize(horizontal: false, vertical: true)
     }
 
     private func requestSideSwitch() {
@@ -770,14 +753,14 @@ private struct IncomingMacConnectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Image(systemName: "person.crop.circle.badge.questionmark")
-                .font(.system(size: 40)).foregroundStyle(.teal)
+                .font(.system(size: 40)).foregroundColor(.systemTeal)
             Text("Incoming connection").font(.title2.weight(.semibold))
             if let request = hosting.pendingRequest {
                 Text("\(request.displayName ?? L("Another computer")) wants to access this Mac.")
-                Text("Partner ID: \(request.viewerID)").font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary)
+                Text("Partner ID: \(request.viewerID)").font(.system(.callout, design: .monospaced)).foregroundColor(.secondary)
             }
             Text("Allow viewing to share your screen. Allow control also gives access to your mouse and keyboard.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             MacSharingDisplayPicker(hosting: hosting)
             if !hosting.canView {
                 Button("Set up Screen Recording…") {
@@ -792,20 +775,20 @@ private struct IncomingMacConnectionView: View {
             if !hosting.canControl {
                 Button("Refresh permissions", action: hosting.refreshPermissions)
                 Text("Use setup to add this copy of MacViewer in System Settings. After granting Screen Recording, reopen the app if macOS asks.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if let error = hosting.errorMessage { Text(error).foregroundStyle(.red).font(.callout) }
+            if let error = hosting.errorMessage { Text(error).foregroundColor(.red).font(.callout) }
             HStack {
-                Button("Decline", role: .cancel, action: hosting.decline).keyboardShortcut(.cancelAction)
+                RoleButton("Decline", role: .cancel, action: hosting.decline).keyboardShortcut(.cancelAction)
                 Spacer()
                 if hosting.isApproving { ProgressView().controlSize(.small) }
                 Button("Allow viewing") { hosting.approve(control: false) }
                     .disabled(!hosting.canView || hosting.isApproving)
                 Button("Allow control") { hosting.approve(control: true) }
-                    .buttonStyle(.borderedProminent).tint(.teal)
+                    .prominentButton(tint: .systemTeal)
                     .disabled(!hosting.canControl || hosting.isApproving)
             }
         }.padding(30).frame(width: 510)
-        .interactiveDismissDisabled(hosting.isApproving)
+        .dismissDisabled(hosting.isApproving)
     }
 }

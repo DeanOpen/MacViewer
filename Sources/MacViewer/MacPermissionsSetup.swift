@@ -126,7 +126,7 @@ private struct MacPermissionsSetupGuide: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Allow access to this Mac").font(.title2.weight(.semibold))
                 Text("Screen Recording shares your display. Accessibility allows keyboard and mouse control.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -140,40 +140,40 @@ private struct MacPermissionsSetupGuide: View {
             VStack(alignment: .leading, spacing: 10) {
                 stepTitle(2, "Drag MacViewer into the app list, then enable it")
                 Text(LF("Drop the app below into the real %@ window. Turn on the switch next to MacViewer.", L(selected.title)))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 24) {
                     VStack(spacing: 6) {
                         MacPermissionAppDragView(appURL: appURL, enabled: isAppBundle)
                             .frame(width: 100, height: 100)
-                            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 18))
-                            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.secondary.opacity(0.2)))
+                            .shapeBackground(Color.quaternaryLabel.opacity(0.5), in: RoundedRectangle(cornerRadius: 18))
+                            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.secondary.opacity(0.2)))
                         Text("MacViewer.app").font(.callout.weight(.medium))
-                        Text("Drag this app").font(.caption).foregroundStyle(.secondary)
+                        Text("Drag this app").font(.caption).foregroundColor(.secondary)
                     }
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 36, weight: .light)).foregroundStyle(.secondary)
+                        .font(.system(size: 36, weight: .light)).foregroundColor(.secondary)
                         .accessibilityHidden(true)
                     VStack(spacing: 8) {
-                        Image(systemName: "gearshape.2.fill").font(.system(size: 37)).foregroundStyle(.secondary)
+                        Image(systemName: "gearshape.2.fill").font(.system(size: 37)).foregroundColor(.secondary)
                         Text("System Settings").font(.callout.weight(.semibold))
-                        Text(L(selected.title)).font(.caption).foregroundStyle(.secondary)
+                        Text(L(selected.title)).font(.caption).foregroundColor(.secondary)
                     }
                     .frame(width: 176, height: 112)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
+                    .shapeBackground(Color.quaternaryLabel.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 4)
 
                 if !isAppBundle {
                     Text("Open the packaged MacViewer.app to drag it here.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundColor(.secondary)
                 }
             }
 
             Text("If MacViewer is already listed, enable its switch. After allowing Screen Recording, quit and reopen MacViewer if it still shows unavailable.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
@@ -187,13 +187,13 @@ private struct MacPermissionsSetupGuide: View {
         .padding(24)
         .frame(width: 610)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private func stepTitle(_ number: Int, _ title: String) -> some View {
         HStack(spacing: 9) {
-            Text("\(number)").font(.caption.weight(.bold)).foregroundStyle(.white)
-                .frame(width: 23, height: 23).background(.blue, in: Circle())
+            Text("\(number)").font(.caption.weight(.bold)).foregroundColor(.white)
+                .frame(width: 23, height: 23).shapeBackground(.blue, in: Circle())
             Text(L(title)).font(.headline)
         }
     }
@@ -203,12 +203,12 @@ private struct MacPermissionsSetupGuide: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: allowed ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(allowed ? Color.green : Color.secondary)
+                    .foregroundColor(allowed ? Color.green : Color.secondary)
                 Text(L(permission.title)).font(.callout.weight(.semibold))
                 Spacer(minLength: 0)
             }
             Text(L(allowed ? "Allowed" : "Not enabled yet"))
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundColor(.secondary)
             Button("Open Settings") {
                 selected = permission
                 permission.openSettings()
@@ -217,8 +217,8 @@ private struct MacPermissionsSetupGuide: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(selected == permission ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.025),
-                    in: RoundedRectangle(cornerRadius: 10))
+        .shapeBackground(selected == permission ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.025),
+                         in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder(selected == permission ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.1)))
     }

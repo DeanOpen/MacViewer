@@ -23,8 +23,8 @@ struct SessionToolsButton: View {
                 Label(LocalizedStringKey(title), systemImage: "bubble.left.and.bubble.right")
                 if !tools.messages.isEmpty {
                     Text(tools.messages.count > 99 ? "99+" : String(tools.messages.count))
-                        .font(.caption2.weight(.semibold)).monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .font(.caption2.weight(.semibold)).digitsMonospaced()
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -46,7 +46,7 @@ struct SessionToolsButton: View {
 struct SessionToolsView: View {
     @ObservedObject var tools: SessionToolsModel
     let peerName: String
-    @FocusState private var draftFocused: Bool
+    @State private var focusDraft: Bool?
     @State private var isDropTargeted = false
 
     private static let timeFormatter: DateFormatter = {
@@ -67,7 +67,7 @@ struct SessionToolsView: View {
             transcript
             if let error = tools.errorMessage {
                 Label(L(error), systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11)).foregroundStyle(.red).lineLimit(2)
+                    .font(.system(size: 11)).foregroundColor(.red).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 5)
             }
@@ -75,8 +75,8 @@ struct SessionToolsView: View {
             composer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay { if isDropTargeted { dropOverlay } }
-        .onAppear { draftFocused = tools.isActive }
+        .overlay(Group { if isDropTargeted { dropOverlay } })
+        .onAppear { if tools.isActive { focusDraft = true } }
         // Drop files anywhere on the chat to send them.
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             guard tools.canTransferFiles, !providers.isEmpty else { return false }
@@ -103,14 +103,14 @@ struct SessionToolsView: View {
             draftField
                 .font(.system(size: 12)).textFieldStyle(.plain)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.quaternary))
-                .focused($draftFocused).disabled(!tools.isActive)
-                .onSubmit { if canSend { tools.sendDraft() } }
+                .shapeBackground(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.quaternaryLabel))
+                .focusOnRequest($focusDraft, equals: true).disabled(!tools.isActive)
+                .submitAction { if canSend { tools.sendDraft() } }
                 .onChange(of: tools.draft) { _ in tools.draftChanged() }
             Button { tools.sendDraft() } label: {
                 Image(systemName: "arrow.up.circle.fill").font(.system(size: 22))
-                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.5))
+                    .foregroundColor(canSend ? Color.accentColor : Color.secondary.opacity(0.5))
             }
             .buttonStyle(.borderless).disabled(!canSend)
             .keyboardShortcut(.return, modifiers: .command)
@@ -130,25 +130,25 @@ struct SessionToolsView: View {
     private var dropOverlay: some View {
         RoundedRectangle(cornerRadius: 10)
             .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            .overlay {
+            .shapeBackground(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
                 VStack(spacing: 6) {
                     Image(systemName: tools.canTransferFiles ? "arrow.down.doc.fill" : "nosign").font(.system(size: 26))
                     Text(tools.canTransferFiles ? LF("Drop to send to %@", peerName) : L("Files can't be sent right now."))
                         .font(.system(size: 12, weight: .medium)).multilineTextAlignment(.center)
                 }
-                .foregroundStyle(tools.canTransferFiles ? Color.accentColor : Color.secondary)
+                .foregroundColor(tools.canTransferFiles ? Color.accentColor : Color.secondary)
                 .padding()
-            }
+            )
             .padding(6)
             .allowsHitTesting(false)
     }
 
     private var clipboardHint: some View {
         HStack(spacing: 6) {
-            Image(systemName: "doc.on.clipboard").foregroundStyle(.secondary)
+            Image(systemName: "doc.on.clipboard").foregroundColor(.secondary)
             Text("Clipboard sharing is off. Text copied on one computer can't be pasted on the other.")
-                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .font(.system(size: 10)).foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Turn On") { tools.setClipboardEnabled(true) }
@@ -158,7 +158,7 @@ struct SessionToolsView: View {
                 .help("Hide").accessibilityLabel("Hide")
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(.quaternary.opacity(0.5))
+        .background(Color.quaternaryLabel.opacity(0.5))
     }
 
     private func chooseFiles() {
@@ -198,7 +198,7 @@ struct SessionToolsView: View {
                 }
                 .padding(10)
             }
-            .background(Color(nsColor: .textBackgroundColor))
+            .background(Color(NSColor.textBackgroundColor))
             .onAppear {
                 if let id = tools.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
             }
@@ -214,10 +214,10 @@ struct SessionToolsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 28)).foregroundStyle(.tertiary)
+            Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 28)).foregroundColor(.tertiaryLabel)
             Text(LF("Chat with %@", peerName)).font(.system(size: 12, weight: .semibold))
             Text("Messages and files appear here. Drag files onto the chat to send them.")
-                .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(.system(size: 11)).foregroundColor(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40).padding(.horizontal, 12)
     }
@@ -225,22 +225,22 @@ struct SessionToolsView: View {
     private func header(_ message: SessionChatMessage) -> some View {
         HStack(spacing: 4) {
             Text(message.isOutgoing ? L("You") : peerName).fontWeight(.semibold)
-            Text(Self.timeFormatter.string(from: message.timestamp)).monospacedDigit()
+            Text(Self.timeFormatter.string(from: message.timestamp)).digitsMonospaced()
         }
-        .font(.system(size: 10)).foregroundStyle(.secondary)
+        .font(.system(size: 10)).foregroundColor(.secondary)
         .padding(.horizontal, 4)
     }
 
     private func bubble(_ message: SessionChatMessage) -> some View {
         Text(message.text)
-            .font(.system(size: 12)).textSelection(.enabled)
-            .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
+            .font(.system(size: 12)).selectableText()
+            .foregroundColor(message.isOutgoing ? Color.white : Color.primary)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(message.isOutgoing ? Color.accentColor : Color(nsColor: .controlBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                if !message.isOutgoing { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
-            }
+            .shapeBackground(message.isOutgoing ? Color.accentColor : Color(NSColor.controlBackgroundColor),
+                             in: RoundedRectangle(cornerRadius: 12))
+            .overlay(Group {
+                if !message.isOutgoing { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.quaternaryLabel) }
+            })
             .fixedSize(horizontal: false, vertical: true)
             .padding(message.isOutgoing ? .leading : .trailing, 30)
             .accessibilityLabel("\(message.isOutgoing ? L("You") : peerName): \(message.text)")
@@ -250,10 +250,10 @@ struct SessionToolsView: View {
         HStack(spacing: 5) {
             Image(systemName: "ellipsis").font(.system(size: 12, weight: .bold))
                 .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+                .shapeBackground(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             Text(LF("%@ is typing…", peerName)).font(.system(size: 10))
         }
-        .foregroundStyle(.secondary).padding(.top, 4)
+        .foregroundColor(.secondary).padding(.top, 4)
     }
 
     // MARK: Files
@@ -271,7 +271,7 @@ struct SessionToolsView: View {
                         statusIcon(transfer)
                         Text(fileStatus(transfer, size: size)).lineLimit(2)
                     }
-                    .font(.system(size: 10)).foregroundStyle(statusColor(transfer))
+                    .font(.system(size: 10)).foregroundColor(statusColor(transfer))
                 }
                 Spacer(minLength: 0)
             }
@@ -283,8 +283,11 @@ struct SessionToolsView: View {
             if !actions.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(actions, id: \.title) { action in
-                        Button(LocalizedStringKey(action.title), action: action.run)
-                            .buttonStyle(action.prominent ? AnyPrimitiveButtonStyle(.borderedProminent) : AnyPrimitiveButtonStyle(.bordered))
+                        if action.prominent {
+                            Button(LocalizedStringKey(action.title), action: action.run).prominentButton()
+                        } else {
+                            Button(LocalizedStringKey(action.title), action: action.run).buttonStyle(BorderedButtonStyle())
+                        }
                     }
                 }
                 .controlSize(.small)
@@ -292,8 +295,8 @@ struct SessionToolsView: View {
         }
         .padding(9)
         .frame(width: 230, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+        .shapeBackground(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.quaternaryLabel))
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onTapGesture(count: 2) {
             if !transfer.isOutgoing, transfer.state == .completed { tools.revealFile(transfer.id) }
@@ -353,13 +356,6 @@ struct SessionToolsView: View {
     }
 }
 
-/// Lets one button pick bordered or bordered-prominent at runtime.
-private struct AnyPrimitiveButtonStyle: PrimitiveButtonStyle {
-    private let make: (Configuration) -> AnyView
-    init<S: PrimitiveButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
-    func makeBody(configuration: Configuration) -> some View { make(configuration) }
-}
-
 /// Toolbar indicator for the shared clipboard: green while sharing is on,
 /// briefly names the last transfer, and opens the recent-items list.
 @MainActor
@@ -371,9 +367,9 @@ struct SessionClipboardButton: View {
         Button { showList.toggle() } label: {
             HStack(spacing: 4) {
                 Image(systemName: tools.clipboardEnabled ? "doc.on.clipboard.fill" : "doc.on.clipboard")
-                    .foregroundStyle(tools.clipboardEnabled ? .green : .secondary)
+                    .foregroundColor(tools.clipboardEnabled ? .green : .secondary)
                 Text(LocalizedStringKey(tools.clipboardNotice ?? (tools.showsClipboardHint ? "Clipboard off" : "Clipboard")))
-                    .foregroundStyle(tools.clipboardNotice == nil ? .primary : Color.green)
+                    .foregroundColor(tools.clipboardNotice == nil ? .primary : Color.green)
                     .lineLimit(1)
             }
             .animation(.easeInOut(duration: 0.2), value: tools.clipboardNotice)
@@ -405,14 +401,14 @@ private struct SessionClipboardList: View {
                     .disabled(!tools.isActive || tools.isUpdatingClipboard)
                 if tools.isUpdatingClipboard { ProgressView().controlSize(.mini) }
             }
-            Text(L(tools.clipboardStatus)).font(.caption).foregroundStyle(.secondary)
+            Text(L(tools.clipboardStatus)).font(.caption).foregroundColor(.secondary)
             Divider()
             if tools.clipboardHistory.isEmpty {
                 Text("Nothing shared yet. Copy text on either computer.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 60)
             } else {
-                Text("Recent").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Recent").font(.caption.weight(.semibold)).foregroundColor(.secondary)
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(tools.clipboardHistory) { entry in row(entry) }
@@ -429,18 +425,18 @@ private struct SessionClipboardList: View {
         Button { tools.copyToMac(entry) } label: {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: entry.isOutgoing ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                    .foregroundStyle(entry.isOutgoing ? .blue : .green)
+                    .foregroundColor(entry.isOutgoing ? .blue : .green)
                 Text(entry.text.trimmingCharacters(in: .whitespacesAndNewlines))
                     .font(.system(size: 11)).lineLimit(2).truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(Self.timeFormatter.string(from: entry.timestamp))
-                    .font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.system(size: 10)).foregroundColor(.secondary).digitsMonospaced()
             }
             .padding(.horizontal, 6).padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .shapeBackground(Color.quaternaryLabel.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
         .help(entry.isOutgoing ? "Sent from this Mac. Click to copy again." : "Received from the other computer. Click to copy.")
     }
 }

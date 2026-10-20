@@ -82,38 +82,42 @@ struct MacViewerSettings: View {
 
     private var general: some View {
         Form {
-            Section("Language") {
+            Section(header: Text("Language")) {
                 Picker("App language", selection: $language) {
                     ForEach(AppLanguage.allCases) { option in
                         Text(LocalizedStringKey(option.title)).tag(option.rawValue)
                     }
                 }
-                Text("Language changes apply immediately.").font(.caption).foregroundStyle(.secondary)
+                Text("Language changes apply immediately.").font(.caption).foregroundColor(.secondary)
             }
-            Section("This Mac") {
-                TextField("Display name", text: $displayName, prompt: Text(MacRegistrationProfile.defaultDisplayName))
+            Section(header: Text("This Mac")) {
+                if #available(macOS 12, *) {
+                    TextField("Display name", text: $displayName, prompt: Text(MacRegistrationProfile.defaultDisplayName))
+                } else {
+                    TextField(MacRegistrationProfile.defaultDisplayName, text: $displayName)
+                }
                 Text(LF("English letters only (no accents), up to 20 characters. The other computer sees this Mac as “%@”. Applies to new connections.",
                         MacRegistrationProfile.loginWireName(displayName).isEmpty
                             ? MacRegistrationProfile.defaultDisplayName : MacRegistrationProfile.loginWireName(displayName)))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
             }
-            Section("History") {
+            Section(header: Text("History")) {
                 Toggle("Remember successfully connected partner IDs", isOn: $rememberPartners)
                     .onChange(of: rememberPartners) { enabled in
                         if !enabled { model.clearRecentPartners() }
                     }
                 Text("Saved passwords are kept separately in macOS Keychain.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
                 Button("Clear Recent Partners") { model.clearRecentPartners() }
                     .disabled(model.recentPartners.isEmpty)
                 Button("Forget saved passwords", action: model.forgetSavedPasswords)
             }
-            Section("Received files") {
+            Section(header: Text("Received files")) {
                 LabeledRow("Save to") {
                     Text(ReceivedFilesFolder.current().map { ($0.path as NSString).abbreviatingWithTildeInPath }
                          ?? L("Ask when the first file arrives"))
-                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).foregroundColor(.secondary)
                 }
                 HStack {
                     Button("Choose Folder…") { _ = ReceivedFilesFolder.choose() }
@@ -122,25 +126,25 @@ struct MacViewerSettings: View {
                     }
                 }
                 Text("Files you save from chat go straight into this folder. Names are never overwritten.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
             }
             .id(receivedFolder)
-            Section("Clipboard") {
+            Section(header: Text("Clipboard")) {
                 Toggle("Share clipboard with the other computer", isOn: $shareClipboard)
                 Text("Text copied on either computer can be pasted on the other. Applies to new sessions.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
             }
-            Section("Remote screen") {
+            Section(header: Text("Remote screen")) {
                 Toggle("Smooth image scaling", isOn: $smoothScreen)
                 Slider(value: $scrollSensitivity, in: 0.25...2, step: 0.25) {
                     Text("Scroll speed")
                 }
                 LabeledRow("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
             }
-            Section("Connection security") {
+            Section(header: Text("Connection security")) {
                 Toggle("Skip the relay certificate check", isOn: $skipCertificateCheck)
                 Text("Only turn this on if connecting fails with a certificate error. While it is on, someone on your network could pose as the UltraViewer relay and see or change the session.")
-                    .font(.caption).foregroundStyle(skipCertificateCheck ? .orange : .secondary)
+                    .font(.caption).foregroundColor(skipCertificateCheck ? .orange : .secondary)
             }
         }
         .groupedForm()
@@ -148,7 +152,7 @@ struct MacViewerSettings: View {
 
     private var about: some View {
         Form {
-            Section("About") {
+            Section(header: Text("About")) {
                 LabeledRow("Application", value: "MacViewer \(Self.version)")
                 LabeledRow("Author", value: MacViewerAbout.author)
                 Link("github.com/DeanOpen/MacViewer", destination: MacViewerAbout.repository)
@@ -158,7 +162,7 @@ struct MacViewerSettings: View {
                     .disabled(updater.state == .checking)
                 Text("An independent native Mac app for UltraViewer interoperability.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
             }
         }
         .groupedForm()

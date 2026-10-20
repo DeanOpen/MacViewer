@@ -178,10 +178,29 @@ final class UpdateChecker: ObservableObject {
 
     nonisolated private static func downloadDMG(from url: URL, into folder: URL,
                                                 progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        let partial = folder.appendingPathComponent(url.lastPathComponent + ".download")
+        if #available(macOS 12, *) {
+            try await streamDownload(from: url, to: partial, progress: progress)
+        } else {
+            try await legacyDownload(from: url, to: partial, progress: progress)
+        }
+        var destination = folder.appendingPathComponent(url.lastPathComponent)
+        var copy = 1
+        while FileManager.default.fileExists(atPath: destination.path) {
+            copy += 1
+            destination = folder.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent) (\(copy)).dmg")
+        }
+        try FileManager.default.moveItem(at: partial, to: destination)
+        progress(1)
+        return destination
+    }
+
+    @available(macOS 12, *)
+    nonisolated private static func streamDownload(from url: URL, to partial: URL,
+                                                   progress: @escaping @Sendable (Double) -> Void) async throws {
         let (bytes, response) = try await URLSession.shared.bytes(from: url)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let expected = max(response.expectedContentLength, 1)
-        let partial = folder.appendingPathComponent(url.lastPathComponent + ".download")
         FileManager.default.createFile(atPath: partial.path, contents: nil)
         let handle = try FileHandle(forWritingTo: partial)
         var buffer = Data(); buffer.reserveCapacity(1 << 20)
@@ -200,15 +219,28 @@ final class UpdateChecker: ObservableObject {
             try? handle.close(); try? FileManager.default.removeItem(at: partial)
             throw error
         }
-        var destination = folder.appendingPathComponent(url.lastPathComponent)
-        var copy = 1
-        while FileManager.default.fileExists(atPath: destination.path) {
-            copy += 1
-            destination = folder.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent) (\(copy)).dmg")
+    }
+
+    /// `URLSession.bytes` needs macOS 12; older systems use a download task.
+    nonisolated private static func legacyDownload(from url: URL, to partial: URL,
+                                                   progress: @escaping @Sendable (Double) -> Void) async throws {
+        var observation: NSKeyValueObservation?
+        defer { observation?.invalidate() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            let task = URLSession.shared.downloadTask(with: url) { location, response, error in
+                do {
+                    if let error { throw error }
+                    guard let location, (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+                    try? FileManager.default.removeItem(at: partial)
+                    try FileManager.default.moveItem(at: location, to: partial)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+            observation = task.progress.observe(\.fractionCompleted) { task, _ in progress(task.fractionCompleted) }
+            task.resume()
         }
-        try FileManager.default.moveItem(at: partial, to: destination)
-        progress(1)
-        return destination
     }
 }
 

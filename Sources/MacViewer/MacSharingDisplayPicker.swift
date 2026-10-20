@@ -23,7 +23,7 @@ struct MacSharingDisplayPicker: View {
                 Text(LocalizedStringKey(hosting.selectedDisplayKey == MacDisplayLayout.allDisplaysKey
                      ? "On Windows, use UltraViewer’s monitor menu to view one display or all displays."
                      : "Only this display is shared. You can change it during the connection."))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

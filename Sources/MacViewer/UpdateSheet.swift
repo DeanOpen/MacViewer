@@ -6,7 +6,7 @@ struct UpdateSheet: View {
     @ObservedObject var updater: UpdateChecker
     /// True while a connection is open; installing restarts the app and ends it.
     let endsConnections: Bool
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     private var isBusy: Bool {
         switch updater.state {
@@ -25,7 +25,7 @@ struct UpdateSheet: View {
                         Text("MacViewer \(release.version) is available").font(.title3.weight(.semibold))
                     }
                     Text("You have version \(updater.currentVersion).")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundColor(.secondary)
                 }
             }
 
@@ -33,14 +33,14 @@ struct UpdateSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("What’s new").font(.subheadline.weight(.semibold))
                     ScrollView {
-                        Text(Self.markdown(notes))
+                        notesText(notes)
                             .font(.callout)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                            .selectableText()
                             .padding(10)
                     }
                     .frame(height: 150)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    .shapeBackground(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
                 }
             }
@@ -53,18 +53,18 @@ struct UpdateSheet: View {
                         .buttonStyle(.link)
                 }
                 Spacer()
-                Button("Later") { dismiss() }
+                Button("Later") { presentationMode.wrappedValue.dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(isBusy)
                 Button("Update and Restart") { updater.install() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .prominentButton()
                     .disabled(isBusy || updater.availableRelease == nil)
             }
         }
         .padding(22)
         .frame(width: 480)
-        .interactiveDismissDisabled(isBusy)
+        .dismissDisabled(isBusy)
     }
 
     @ViewBuilder
@@ -74,24 +74,30 @@ struct UpdateSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 ProgressView(value: progress)
                 Text("Downloading… \(Int((progress * 100).rounded()))%")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.caption).foregroundColor(.secondary).digitsMonospaced()
             }
         case .installing:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Installing update… MacViewer will restart.").font(.caption).foregroundStyle(.secondary)
+                Text("Installing update… MacViewer will restart.").font(.caption).foregroundColor(.secondary)
             }
         default:
             if let error = updater.installError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.red)
+                    .font(.caption).foregroundColor(.red)
             } else if endsConnections {
                 Label("Updating restarts MacViewer and ends current connections.", systemImage: "exclamationmark.circle")
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(.caption).foregroundColor(.orange)
             }
         }
     }
 
+    /// Markdown in `Text` needs macOS 12; older systems show the notes as plain text.
+    @ViewBuilder private func notesText(_ notes: String) -> some View {
+        if #available(macOS 12, *) { Text(Self.markdown(notes)) } else { Text(notes) }
+    }
+
+    @available(macOS 12, *)
     private static func markdown(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)

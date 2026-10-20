@@ -78,7 +78,7 @@ struct RemoteSessionToolbar: View {
             Divider().frame(height: 23)
             VStack(alignment: .leading, spacing: 0) {
                 Text(peerName).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                Text("UltraViewer compatible").font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                Text("UltraViewer compatible").font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
             }.frame(maxWidth: 130, alignment: .leading)
             Spacer(minLength: 4)
             actionsMenu
@@ -91,49 +91,45 @@ struct RemoteSessionToolbar: View {
             Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
                 .disabled(!isConnected || !allowsControl).fixedSize()
             Toggle(isOn: $forwardShortcuts) { Label("Send ⌘ shortcuts", systemImage: "command") }
-                .toggleStyle(.button).fixedSize()
+                .buttonToggle().fixedSize()
                 .disabled(!controlEnabled)
                 .help(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts go to the other computer. Click to keep them on this Mac."
                                        : "⌘ shortcuts stay on this Mac. Click to send them to the other computer."))
                 .accessibilityLabel("Send keyboard shortcuts to the other computer")
             Divider().frame(height: 23)
             // Filled red so it reads as a button among the borderless toolbar items.
-            Button(role: .destructive, action: callbacks.disconnect) {
+            RoleButton(role: .destructive, action: callbacks.disconnect) {
                 Label("Disconnect", systemImage: "xmark.circle.fill")
             }
-            .buttonStyle(.borderedProminent).tint(.red)
+            .prominentButton(tint: .red)
             .help("End the connection to this computer")
             Button(action: callbacks.hideToolbar) { Image(systemName: "chevron.up") }
                 .help("Hide session toolbar").accessibilityLabel("Hide session toolbar")
         }
         .font(.system(size: 12)).buttonStyle(.borderless).controlSize(.small)
-        .padding(.horizontal, 12).padding(.vertical, 5).background(.bar)
+        .padding(.horizontal, 12).padding(.vertical, 5).barBackground()
         .sheet(isPresented: $showCustomQuality) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Image quality").font(.title2.weight(.semibold))
                 Text("Lower quality uses less bandwidth. Higher quality keeps more image detail.")
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
                 Slider(value: $customQuality, in: 1...100, step: 1)
                 HStack {
-                    Text("Quality: \(Int(customQuality))").monospacedDigit()
+                    Text("Quality: \(Int(customQuality))").digitsMonospaced()
                     Spacer()
                     Button("Cancel") { showCustomQuality = false }
                     Button("Apply") { callbacks.setCustomImageQuality?(Int(customQuality)); showCustomQuality = false }
-                        .buttonStyle(.borderedProminent)
+                        .prominentButton()
                 }
             }.padding(24).frame(width: 380)
         }
-        .confirmationDialog(LF("Restart %@?", peerName), isPresented: $confirmRestart, titleVisibility: .visible) {
-            Button("Restart remote computer", role: .destructive) { callbacks.restart?() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The remote session will disconnect. Unsaved work on that computer may be lost.")
-        }
-        .alert("Capture failed", isPresented: Binding(
+        .appDialog(LF("Restart %@?", peerName), isPresented: $confirmRestart, confirmation: true,
+                   message: L("The remote session will disconnect. Unsaved work on that computer may be lost."),
+                   buttons: [DialogButton(title: L("Restart remote computer"), role: .destructive) { callbacks.restart?() }, .cancel()])
+        .appDialog(L("Capture failed"), isPresented: Binding(
             get: { capture.errorMessage != nil },
-            set: { if !$0 { capture.clearError() } })) {
-                Button("OK", role: .cancel, action: capture.clearError)
-            } message: { Text(capture.errorMessage ?? "") }
+            set: { if !$0 { capture.clearError() } }),
+                   message: capture.errorMessage, buttons: [.cancel(L("OK"), action: capture.clearError)])
     }
 
     private var actionsMenu: some View {
@@ -296,7 +292,7 @@ struct RemoteScreenViewport: View {
                     screen.frame(width: size.width, height: size.height)
                         .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                 }
-                .background(.black)
+                .background(Color.black)
             }
         }
     }

@@ -103,3 +103,211 @@ struct CornerRoundedRectangle: Shape {
         return path
     }
 }
+
+// Fallbacks for the experimental macOS 11 build (MACVIEWER_MIN_MACOS=11).
+
+extension Color {
+    /// The `.tertiary`/`.quaternary` shape styles and `Color.teal` need macOS 12.
+    static let tertiaryLabel = Color(NSColor.tertiaryLabelColor)
+    static let quaternaryLabel = Color(NSColor.quaternaryLabelColor)
+    static let systemTeal = Color(NSColor.systemTeal)
+}
+
+extension View {
+    /// `background(_:in:)` needs macOS 12.
+    func shapeBackground<S: Shape>(_ color: Color, in shape: S) -> some View {
+        background(shape.fill(color))
+    }
+
+    /// `.background(.regularMaterial, in:)` needs macOS 12; older systems get a solid window color.
+    func materialBackground<S: Shape>(in shape: S) -> some View {
+        if #available(macOS 12, *) { return AnyView(background(.regularMaterial, in: shape)) }
+        return AnyView(shapeBackground(Color(NSColor.windowBackgroundColor), in: shape))
+    }
+
+    /// `.background(.bar)` needs macOS 12.
+    func barBackground() -> some View {
+        if #available(macOS 12, *) { return AnyView(background(.bar)) }
+        return AnyView(background(Color(NSColor.windowBackgroundColor)))
+    }
+
+    /// `.buttonStyle(.borderedProminent)` and `.tint` need macOS 12; older systems get a plain bordered button.
+    func prominentButton(tint: Color? = nil) -> some View {
+        if #available(macOS 12, *) { return AnyView(buttonStyle(.borderedProminent).tint(tint)) }
+        return AnyView(buttonStyle(BorderedButtonStyle()))
+    }
+
+    /// `.toggleStyle(.button)` needs macOS 12; older systems show a checkbox.
+    func buttonToggle() -> some View {
+        if #available(macOS 12, *) { return AnyView(toggleStyle(.button)) }
+        return AnyView(toggleStyle(CheckboxToggleStyle()))
+    }
+
+    /// `textSelection(.enabled)` needs macOS 12.
+    func selectableText() -> some View {
+        if #available(macOS 12, *) { return AnyView(textSelection(.enabled)) }
+        return AnyView(self)
+    }
+
+    /// `View.monospacedDigit()` needs macOS 12.
+    func digitsMonospaced() -> some View {
+        if #available(macOS 12, *) { return AnyView(monospacedDigit()) }
+        return AnyView(self)
+    }
+
+    /// `interactiveDismissDisabled` needs macOS 12.
+    func dismissDisabled(_ disabled: Bool) -> some View {
+        if #available(macOS 12, *) { return AnyView(interactiveDismissDisabled(disabled)) }
+        return AnyView(self)
+    }
+
+    /// `onSubmit` needs macOS 12; on older systems Return does nothing extra.
+    func submitAction(_ action: @escaping () -> Void) -> some View {
+        if #available(macOS 12, *) { return AnyView(onSubmit(action)) }
+        return AnyView(self)
+    }
+
+    /// `@FocusState` needs macOS 12. Setting `request` to `value` focuses this
+    /// field once and clears the request; on older systems focus stays put.
+    func focusOnRequest<Value: Hashable>(_ request: Binding<Value?>, equals value: Value) -> some View {
+        if #available(macOS 12, *) { return AnyView(modifier(FocusRequestModifier(request: request, value: value))) }
+        return AnyView(self)
+    }
+}
+
+@available(macOS 12, *)
+private struct FocusRequestModifier<Value: Hashable>: ViewModifier {
+    @Binding var request: Value?
+    let value: Value
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content.focused($focused)
+            .onAppear(perform: apply)
+            .onChange(of: request) { _ in apply() }
+    }
+
+    private func apply() {
+        guard request == value else { return }
+        focused = true
+        request = nil
+    }
+}
+
+/// `Button(role:)` needs macOS 12; older systems get a plain button.
+struct RoleButton<Label: View>: View {
+    let role: DialogButton.Role
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        if #available(macOS 12, *) {
+            Button(role: role.buttonRole, action: action, label: label)
+        } else {
+            Button(action: action, label: label)
+        }
+    }
+}
+
+extension RoleButton where Label == Text {
+    init(_ title: LocalizedStringKey, role: DialogButton.Role, action: @escaping () -> Void) {
+        self.init(role: role, action: action) { Text(title) }
+    }
+}
+
+/// One button of an `appDialog`.
+struct DialogButton {
+    enum Role {
+        case normal, cancel, destructive
+
+        @available(macOS 12, *)
+        var buttonRole: ButtonRole? {
+            switch self {
+            case .normal: nil
+            case .cancel: .cancel
+            case .destructive: .destructive
+            }
+        }
+    }
+    let title: String
+    var role: Role = .normal
+    var action: () -> Void = {}
+
+    static func cancel(_ title: String = L("Cancel"), action: @escaping () -> Void = {}) -> DialogButton {
+        DialogButton(title: title, role: .cancel, action: action)
+    }
+}
+
+extension View {
+    /// `.alert`/`.confirmationDialog` with `actions:` need macOS 12; older
+    /// systems show the same buttons in an `NSAlert`.
+    func appDialog(_ title: String, isPresented: Binding<Bool>, confirmation: Bool = false, message: String? = nil,
+                   textField: (placeholder: String, text: Binding<String>)? = nil, buttons: [DialogButton]) -> some View {
+        modifier(AppDialogModifier(title: title, isPresented: isPresented, confirmation: confirmation, message: message,
+                                   textField: textField, buttons: buttons))
+    }
+}
+
+private struct AppDialogModifier: ViewModifier {
+    let title: String
+    @Binding var isPresented: Bool
+    let confirmation: Bool
+    let message: String?
+    let textField: (placeholder: String, text: Binding<String>)?
+    let buttons: [DialogButton]
+
+    func body(content: Content) -> some View {
+        if #available(macOS 12, *) {
+            if confirmation {
+                content.confirmationDialog(title, isPresented: $isPresented, titleVisibility: .visible) { actions } message: { messageText }
+            } else {
+                content.alert(title, isPresented: $isPresented) { actions } message: { messageText }
+            }
+        } else {
+            content
+                .onAppear { if isPresented { presentLegacyAlert() } }
+                .onChange(of: isPresented) { if $0 { presentLegacyAlert() } }
+        }
+    }
+
+    @available(macOS 12, *)
+    @ViewBuilder private var actions: some View {
+        if let textField { TextField(textField.placeholder, text: textField.text) }
+        ForEach(buttons.indices, id: \.self) { index in
+            let button = buttons[index]
+            Button(button.title, role: button.role.buttonRole, action: button.action)
+        }
+    }
+
+    @ViewBuilder private var messageText: some View {
+        if let message { Text(message) }
+    }
+
+    private func presentLegacyAlert() {
+        DispatchQueue.main.async {
+            guard isPresented else { return }
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message ?? ""
+            // NSAlert's first button is the default; keep cancel last so Escape picks it.
+            let ordered = buttons.filter { $0.role != .cancel } + buttons.filter { $0.role == .cancel }
+            for button in ordered {
+                let added = alert.addButton(withTitle: button.title)
+                added.hasDestructiveAction = button.role == .destructive
+                if button.role == .cancel { added.keyEquivalent = "\u{1b}" }
+            }
+            let field = textField.map { NSTextField(string: $0.text.wrappedValue) }
+            if let field {
+                field.placeholderString = textField?.placeholder
+                field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+                alert.accessoryView = field
+                alert.window.initialFirstResponder = field
+            }
+            let index = alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            if let field { textField?.text.wrappedValue = field.stringValue }
+            if ordered.indices.contains(index) { ordered[index].action() }
+            // Run the action first: some bindings treat dismissal as "decline".
+            if isPresented { isPresented = false }
+        }
+    }
+}
