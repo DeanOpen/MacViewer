@@ -85,9 +85,14 @@ CONTROL
   deb="$out/linuxviewer_${version}_${deb_arch}.deb"
   dpkg-deb --build --root-owner-group "$deb_root" "$deb" >/dev/null
   echo "wrote $deb"
+  # Fixed name so the README can link to releases/latest/download/.
+  cp "$deb" "$out/linuxviewer-${deb_arch}.deb"
 else
   echo "dpkg-deb not found; skipped .deb"
 fi
+
+# Fixed-name tarball copy for the stable download link.
+cp "$tarball" "$out/linuxviewer-${arch}.tar.gz"
 
 rm -rf "$stage" "$out/deb"
 ( cd "$out" && sha256sum linuxviewer-* 2>/dev/null || shasum -a 256 linuxviewer-* ) > "$out/SHA256SUMS-linux.txt" || true

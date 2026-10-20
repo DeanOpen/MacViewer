@@ -23,11 +23,30 @@ Linux counterpart of MacViewer and speaks the same protocol, ported from
 Not supported yet: chat, clipboard, file transfer, audio, LAN direct and
 Wayland hosting.
 
-## Build
+## Install
 
-Requirements: Rust 1.80+, plus on Linux `libxkbcommon-dev`, `libx11-dev` and
-`libxcb1-dev`. The crate reads `../Sources/UltraViewerProtocol/Resources/8bit.dat`,
-so build it inside a full checkout of this repository.
+Debian, Ubuntu, Linux Mint (x86_64):
+
+```sh
+curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-amd64.deb
+sudo apt install ./linuxviewer.deb
+```
+
+Or the portable tarball (any distro, no install):
+
+```sh
+curl -L https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-x86_64.tar.gz | sudo tar -xz -C /
+```
+
+Then run `linuxviewer`.
+
+## Build from source
+
+Requirements: Rust 1.80+, plus on Linux `libxkbcommon-dev`, `libx11-dev`,
+`libxcb1-dev`, `libasound2-dev`, `libpipewire-0.3-dev` and `libclang-dev` (drop
+PipeWire with `--no-default-features`, which also removes Wayland hosting). The
+crate reads `../Sources/UltraViewerProtocol/Resources/8bit.dat`, so build it
+inside a full checkout of this repository.
 
 ```sh
 cd LinuxViewer

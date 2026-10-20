@@ -197,14 +197,37 @@ open dist/MacViewer.app
 ## Linux (LinuxViewer, thử nghiệm)
 
 [`LinuxViewer/`](LinuxViewer/) là bản cho Linux viết bằng Rust: kết nối và
-điều khiển máy chạy UltraViewer, và cho người khác truy cập màn hình Linux (X11).
-Xem [LinuxViewer/README.md](LinuxViewer/README.md).
+điều khiển máy chạy UltraViewer, và cho người khác truy cập màn hình Linux (X11
+hoặc Wayland). Xem [LinuxViewer/README.md](LinuxViewer/README.md).
+
+**Cài đặt (Debian, Ubuntu, Linux Mint — x86_64):**
+
+```sh
+curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-amd64.deb
+sudo apt install ./linuxviewer.deb
+linuxviewer                       # mở cửa sổ kết nối
+```
+
+**Hoặc bản nén chạy ngay** (mọi bản Linux, không cần cài):
+
+```sh
+curl -L https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-x86_64.tar.gz | sudo tar -xz -C /
+linuxviewer
+```
+
+**Dòng lệnh:**
+
+```sh
+linuxviewer connect 123456789   # xem và điều khiển máy khác
+linuxviewer host                # chia sẻ màn hình Linux
+```
+
+**Build từ mã nguồn** (cần Rust và `libxkbcommon-dev libasound2-dev libpipewire-0.3-dev libclang-dev`):
 
 ```sh
 cd LinuxViewer
 cargo build --release
-./target/release/linuxviewer connect 123456789   # xem và điều khiển máy khác
-./target/release/linuxviewer host                # chia sẻ màn hình Linux (X11)
+./target/release/linuxviewer
 ```
 
 ## Cấu trúc thư mục

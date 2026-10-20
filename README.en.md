@@ -201,14 +201,37 @@ open dist/MacViewer.app
 ## Linux (LinuxViewer, experimental)
 
 [`LinuxViewer/`](LinuxViewer/) is a Rust port for Linux. It connects to and
-controls UltraViewer machines, and it can share an X11 desktop. See
+controls UltraViewer machines, and it can share an X11 or Wayland desktop. See
 [LinuxViewer/README.md](LinuxViewer/README.md).
+
+**Install (Debian, Ubuntu, Linux Mint — x86_64):**
+
+```sh
+curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-amd64.deb
+sudo apt install ./linuxviewer.deb
+linuxviewer                       # open the connect window
+```
+
+**Or the portable tarball** (any distro, no install):
+
+```sh
+curl -L https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-x86_64.tar.gz | sudo tar -xz -C /
+linuxviewer
+```
+
+**Command line:**
+
+```sh
+linuxviewer connect 123456789   # view and control a machine
+linuxviewer host                # share this Linux desktop
+```
+
+**Build from source** (needs Rust and `libxkbcommon-dev libasound2-dev libpipewire-0.3-dev libclang-dev`):
 
 ```sh
 cd LinuxViewer
 cargo build --release
-./target/release/linuxviewer connect 123456789   # view and control a machine
-./target/release/linuxviewer host                # share this Linux desktop (X11)
+./target/release/linuxviewer
 ```
 
 ## Project layout
