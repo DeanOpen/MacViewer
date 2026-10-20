@@ -14,6 +14,8 @@ pub struct Registration {
     pub mac_address: String,       // uppercase hex, no separators
     pub operating_system: String,  // Build|Major|MajorRevision|Minor|MinorRevision|Revision
     pub user_name: String,         // ASCII, or base64 of UTF-8
+    /// Field 13: MD5(32 spaces + master password), hosts only; usually empty.
+    pub custom_password: String,
 }
 
 impl Registration {
@@ -22,35 +24,100 @@ impl Registration {
         join_fields(&[
             "3", &self.device_identity, &self.password, "0", &self.local_address, "0",
             &self.computer_name_b64, CLIENT_VERSION, &self.mac_address, "", &self.operating_system,
-            "0", "", "", "0", "", &self.user_name, "0", "0", "0", "0", "0",
+            "0", "", &self.custom_password, "0", "", &self.user_name, "0", "0", "0", "0", "0",
             "0", "0", "0", "", "", "",
         ])
     }
 }
 
-/// Returns the assigned ID from a "3:" reply.
-pub fn parse_registration_reply(p: &[u8]) -> Result<String> {
-    let text = ascii_text(p)?;
-    let f: Vec<&str> = text.split(':').collect();
-    if f.len() < 11 || f.len() > 128 || f[0] != "3" {
-        return Err("malformed registration reply".into());
+/// ClientRegistration.Reply: plain "3:" reply after the system envelope byte.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RegistrationReply {
+    pub public_port: u16,
+    /// Assigned ID without leading zeros.
+    pub id: String,
+    pub public_address: Ipv4,
+    pub status: i32,
+    /// All original fields, including empty/unknown ones.
+    pub fields: Vec<String>,
+}
+
+impl RegistrationReply {
+    pub fn ping_list(&self) -> &str {
+        &self.fields[6]
     }
-    match f[2].parse::<u64>() {
-        Ok(id) if id != 0 && f[2].bytes().all(|b| b.is_ascii_digit()) => Ok(id.to_string()),
-        _ => Err("registration reply has no ID".into()),
+    pub fn ping_host_name_list(&self) -> &str {
+        &self.fields[9]
+    }
+    pub fn opaque_server_token(&self) -> &str {
+        &self.fields[10]
     }
 }
 
-/// Command 8 (PeerLookup.Request) without LAN-direct details.
+pub fn parse_registration_reply(p: &[u8]) -> Result<RegistrationReply> {
+    if p.len() > 65_536 {
+        return Err("registration reply too large".into());
+    }
+    let text = ascii_text(p)?;
+    let f: Vec<&str> = text.split(':').collect();
+    if f.len() > 128 {
+        return Err("too many registration reply fields".into());
+    }
+    if f.len() < 11 {
+        return Err("malformed registration reply".into());
+    }
+    if f[0] != "3" {
+        return Err("not a registration reply".into());
+    }
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let public_port = match f[1].parse::<u16>() {
+        Ok(p) if p != 0 && digits(f[1]) => p,
+        _ => return Err("registration reply has an invalid port".into()),
+    };
+    let id = match f[2].parse::<u64>() {
+        Ok(id) if id != 0 && digits(f[2]) => id.to_string(),
+        _ => return Err("registration reply has no ID".into()),
+    };
+    let public_address = Ipv4::parse(f[3]).map_err(|_| "registration reply has an invalid address")?;
+    let status = match f[7].parse::<i32>() {
+        Ok(s) if s.to_string() == f[7] => s,
+        _ => return Err("registration reply has an invalid status".into()),
+    };
+    Ok(RegistrationReply { public_port, id, public_address, status, fields: f.iter().map(|s| s.to_string()).collect() })
+}
+
+/// Command 8 (PeerLookup.Request) without LAN-direct details, with
+/// MacViewer's fixed license/referral values.
 pub fn lookup_text(target_id: &str, password: &str, local_id: &str, local_password: &str,
                    correlation: i32, tz_offset_minutes: i32) -> Result<String> {
-    if !password.is_ascii() {
+    lookup_fields(&LookupRequest {
+        target_id, password, license: "", license2: "", local_id, local_password, correlation,
+        referral: "0", payment: "0", tz_offset_minutes, dictionary_count: 1,
+    })
+}
+
+pub struct LookupRequest<'a> {
+    pub target_id: &'a str,
+    pub password: &'a str,
+    pub license: &'a str,
+    pub license2: &'a str,
+    pub local_id: &'a str,
+    pub local_password: &'a str,
+    pub correlation: i32,
+    pub referral: &'a str,
+    pub payment: &'a str,
+    pub tz_offset_minutes: i32,
+    pub dictionary_count: i32,
+}
+
+pub fn lookup_fields(r: &LookupRequest) -> Result<String> {
+    if !r.password.is_ascii() || !r.local_password.is_ascii() {
         return Err("UltraViewer passwords must be ASCII".into());
     }
     join_fields(&[
-        "8", target_id, &md5_hex(&(" ".repeat(32) + password)), CLIENT_VERSION, "", "",
-        local_id, &md5_hex(&format!("{local_id}{local_password}")), "-1", &correlation.to_string(),
-        "0", "0", "0", &tz_offset_minutes.to_string(), "1", "", "",
+        "8", r.target_id, &md5_hex(&(" ".repeat(32) + r.password)), CLIENT_VERSION, r.license, r.license2,
+        r.local_id, &md5_hex(&format!("{}{}", r.local_id, r.local_password)), "-1", &r.correlation.to_string(),
+        "0", r.referral, r.payment, &r.tz_offset_minutes.to_string(), &r.dictionary_count.to_string(), "", "",
     ])
 }
 
@@ -159,7 +226,7 @@ pub(crate) mod tests {
         Registration {
             device_identity: "A".repeat(32), password: "12345678".into(), local_address: "192.0.2.10".into(),
             computer_name_b64: "aG9zdA==".into(), mac_address: "001122334455".into(),
-            operating_system: "0|6|0|8|0|0".into(), user_name: "me".into(),
+            operating_system: "0|6|0|8|0|0".into(), user_name: "me".into(), custom_password: String::new(),
         }
     }
 
@@ -190,7 +257,7 @@ pub(crate) mod tests {
 
     #[test]
     fn replies_parse() {
-        let id = parse_registration_reply(b"3:443:00111222333:203.0.113.7::0:ping-list:-1:17/10/2026:relay.example:opaque-token").unwrap();
+        let id = parse_registration_reply(b"3:443:00111222333:203.0.113.7::0:ping-list:-1:17/10/2026:relay.example:opaque-token").unwrap().id;
         assert_eq!(id, "111222333");
         let r = parse_lookup_reply(b"8:1:192.0.2.9:unused:203.0.113.9:54000:5900:1:bmFtZQ==:55100:x:198.51.100.2:0:3:relay.example:a:b:c:d:e:secret:direct-info:77").unwrap();
         let p = r.peer.unwrap();
@@ -200,5 +267,67 @@ pub(crate) mod tests {
         let wrong = parse_lookup_reply(b"8:2:77").unwrap();
         assert!(wrong.status == 2 && wrong.peer.is_none());
         assert!(version_at_least("6.6.133", [6, 0, 0]) && !version_at_least("5.9.9", [6, 0, 0]) && !version_at_least("6.0", [6, 0, 0]));
+    }
+
+    // Tests/UltraViewerProtocolTests/ClientRegistrationTests.swift
+    #[test]
+    fn registration_reply_fixtures() {
+        let r = parse_registration_reply(b"3:443:00111222333:203.0.113.7:unknown:1:ping-list:0:17/10/2026:relay.example:opaque-token:future:").unwrap();
+        assert_eq!((r.public_port, r.id.as_str(), r.public_address.to_string().as_str(), r.status), (443, "111222333", "203.0.113.7", 0));
+        assert_eq!((r.fields[2].as_str(), r.ping_list(), r.ping_host_name_list(), r.opaque_server_token()),
+                   ("00111222333", "ping-list", "relay.example", "opaque-token"));
+        assert_eq!(&r.fields[r.fields.len() - 2..], ["future", ""]);
+        let no_date = parse_registration_reply(b"3:2112:42:192.0.2.2::0::-1:ignored::").unwrap();
+        assert!(no_date.ping_host_name_list().is_empty() && no_date.opaque_server_token().is_empty());
+
+        let valid = ["3", "443", "123456789", "203.0.113.10", "", "0", "", "-1", "", "", ""];
+        assert!(parse_registration_reply(valid.join(":").as_bytes()).is_ok());
+        for (i, v) in [(0, "8"), (1, "0"), (1, "65536"), (1, "-1"), (2, "0"), (2, "18446744073709551616"), (2, "1e5"),
+                       (3, "256.0.0.1"), (3, "localhost"), (7, "2147483648"), (7, "")] {
+            let mut f = valid;
+            f[i] = v;
+            assert!(parse_registration_reply(f.join(":").as_bytes()).is_err(), "{i} {v}");
+        }
+        assert!(parse_registration_reply(b"3:443:123:192.0.2.1").is_err());
+        let mut nul = valid.join(":").into_bytes();
+        nul.push(0);
+        assert!(parse_registration_reply(&nul).is_err());
+    }
+
+    // Tests/UltraViewerProtocolTests/PeerLookupTests.swift
+    #[test]
+    fn lookup_fixtures() {
+        let text = lookup_fields(&LookupRequest {
+            target_id: "peer-17", password: "peer-pass", license: "lic-a", license2: "lic-b", local_id: "local-42",
+            local_password: "self-pass", correlation: 42, referral: "1.5", payment: "free", tz_offset_minutes: 420,
+            dictionary_count: 2,
+        }).unwrap();
+        assert_eq!(text, "8:peer-17:e3f326c385d2606a12a2d77260e3e81d:6.6.133:lic-a:lic-b:local-42:206a9ce1ea16f69943378fed8366ca11:-1:42:0:1.5:free:420:2::");
+        let r = parse_lookup_reply(b"8:1:192.0.2.9:unused:203.0.113.9:54000:5900:5901:TmFtZQ==:55100:unused:198.51.100.2:-1:123:relay.example:x:x:x:x:x:secret:direct-info:42").unwrap();
+        assert_eq!(r.correlation, Some(42));
+        let p = r.peer.unwrap();
+        assert_eq!((p.public_ip.to_string().as_str(), p.target_port, p.relay_ip.as_str(), p.secret_token.as_str(), p.computer_name_b64.as_str()),
+                   ("203.0.113.9", 55100, "198.51.100.2", "secret", "TmFtZQ=="));
+        assert!(parse_lookup_reply(b"8:2:42").unwrap().peer.is_none());
+        assert!(parse_lookup_reply(b"8:1").is_err());
+        assert!(parse_lookup_reply(b"3:1:42").is_err());
+        assert!(lookup_text("injected:field", "pw", "1", "1", 1, 0).is_err());
+    }
+
+    // Tests/UltraViewerProtocolTests/PartnerLoginMessageTests.swift (fixed-context subset)
+    #[test]
+    fn login_proofs_match_fixture() {
+        let login = login_text("test-pass", "12345678", &LoginContext {
+            screen_width: 1920, screen_height: 1080, local_id: "111222333", display_name: "Mac: Viewer!",
+            control_mode: 1, clear_control_mode: false, connection_hash: "connection-key", partner_secret_token: "peer-secret",
+        }).unwrap();
+        let f: Vec<&str> = login.split(':').collect();
+        assert_eq!(f[2], "c10f3394b41ec5b86060e0285e0dd306");
+        assert_eq!(f[13], "85347ba7a403ffed52d311b7c5b6b549");
+        assert_eq!((f[11], f[12]), ("Mac Viewer", "1"));
+        for nonce in ["", "1234567", "123456789", "12:45678"] {
+            assert!(login_text("x", nonce, &LoginContext { screen_width: 1, screen_height: 1, local_id: "1", display_name: "a",
+                control_mode: 0, clear_control_mode: false, connection_hash: "h", partner_secret_token: "" }).is_err());
+        }
     }
 }

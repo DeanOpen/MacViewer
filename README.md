@@ -191,6 +191,19 @@ scripts/package_app.sh release   # build ra dist/MacViewer.app
 open dist/MacViewer.app
 ```
 
+## Linux (LinuxViewer, thử nghiệm)
+
+[`LinuxViewer/`](LinuxViewer/) là bản cho Linux viết bằng Rust: kết nối và
+điều khiển máy chạy UltraViewer, và cho người khác truy cập màn hình Linux (X11).
+Xem [LinuxViewer/README.md](LinuxViewer/README.md).
+
+```sh
+cd LinuxViewer
+cargo build --release
+./target/release/linuxviewer connect 123456789   # xem và điều khiển máy khác
+./target/release/linuxviewer host                # chia sẻ màn hình Linux (X11)
+```
+
 ## Cấu trúc thư mục
 
 ```
@@ -201,6 +214,7 @@ ThirdParty/
   zstd/                   Thư viện nén Zstandard 1.5.7 (BSD / GPLv2)
   g722/                   Bộ giải mã âm thanh G.722 của WebRTC
 Tests/                    Unit test
+LinuxViewer/              Bản cho Linux viết bằng Rust (xem/điều khiển + chia sẻ X11)
 scripts/                  Script đóng gói app và tạo file DMG
 ```
 

@@ -195,6 +195,19 @@ scripts/package_app.sh release   # build dist/MacViewer.app
 open dist/MacViewer.app
 ```
 
+## Linux (LinuxViewer, experimental)
+
+[`LinuxViewer/`](LinuxViewer/) is a Rust port for Linux. It connects to and
+controls UltraViewer machines, and it can share an X11 desktop. See
+[LinuxViewer/README.md](LinuxViewer/README.md).
+
+```sh
+cd LinuxViewer
+cargo build --release
+./target/release/linuxviewer connect 123456789   # view and control a machine
+./target/release/linuxviewer host                # share this Linux desktop (X11)
+```
+
 ## Project layout
 
 ```
@@ -205,6 +218,7 @@ ThirdParty/
   zstd/                   Zstandard 1.5.7 (BSD / GPLv2)
   g722/                   WebRTC G.722 decoder
 Tests/                    Protocol and app unit tests
+LinuxViewer/              Rust port for Linux (viewer + X11 hosting)
 scripts/                  App packaging, icon and DMG generation
 ```
 

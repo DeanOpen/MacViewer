@@ -65,3 +65,6 @@ venv/
 *.swp
 *~
 linux-viewer/
+
+# Rust (LinuxViewer)
+/LinuxViewer/target/

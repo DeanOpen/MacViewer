@@ -87,6 +87,16 @@ pub fn decode_envelope(b: &[u8]) -> Result<Envelope<'_>> {
     }
 }
 
+/// RelayKeepalive.relayEnvelope: plain "ping" system message to a relay.
+pub fn relay_keepalive_envelope() -> Vec<u8> {
+    system_envelope(b"ping", false)
+}
+
+/// RelayKeepalive.commandEnvelope: encrypted ASCII "2" on the command channel.
+pub fn command_keepalive_envelope() -> Vec<u8> {
+    system_envelope(&CommandCipher::server().encrypt(b"2"), true)
+}
+
 pub fn http_preamble(host: &str) -> Vec<u8> {
     [
         "POST /UVService/ HTTP/1.1",
@@ -241,10 +251,39 @@ mod tests {
         let b = forward_envelope(ip, 0x1234, false, b"x");
         assert_eq!(b, [0, 0, 7, 113, 0, 203, 0x34, 0x12, b'x']);
         assert_eq!(decode_envelope(&b).unwrap(), Envelope::Forward { ip, port: 0x1234, payload: b"x" });
-        let parts = decode_multipart(&encode_multipart(&[&[1], &[], b"ab"])).unwrap();
+        let encoded = encode_multipart(&[&[1], &[], b"ab"]);
+        let parts = decode_multipart(&encoded).unwrap();
         assert_eq!(parts, [&[1u8][..], &[], b"ab"]);
         assert!(decode_multipart(&[5, 0, 0, 0, 1]).is_err());
         assert!(Ipv4::parse("1.2.3.256").is_err() && Ipv4::parse("1.2.3").is_err());
+    }
+
+    // Tests/UltraViewerProtocolTests/RelayEnvelopeTests.swift
+    #[test]
+    fn relay_envelope_fixtures() {
+        assert_eq!(encode_frame(&relay_keepalive_envelope()), [5, 0, 0, 0, 1, 0x70, 0x69, 0x6e, 0x67]);
+        assert_eq!(encode_frame(&command_keepalive_envelope()), [10, 0, 0, 0, 1, 0, 0x2d, 0x93, 0x29, 0x71, 0xdd, 0x9d, 0xcb, 0x2d]);
+        let ip = Ipv4::parse("192.0.2.10").unwrap();
+        let inner = [0, 0, 10, 2, 0, 192, 0x39, 0x30, 0xaa, 0xbb];
+        assert_eq!(forward_envelope(ip, 12345, false, &[0xaa, 0xbb]), inner);
+        assert_eq!(decode_envelope(&inner).unwrap(), Envelope::Forward { ip, port: 12345, payload: &[0xaa, 0xbb] });
+        assert_eq!(Ipv4::parse("192.000.2.10").unwrap().to_string(), "192.0.2.10");
+        assert_eq!(forward_envelope(Ipv4([255; 4]), u16::MAX, true, &[]), [0, 1, 255, 255, 255, 255, 255, 255]);
+        assert!(decode_envelope(&[]).is_err());
+        for n in 1..8 {
+            assert!(decode_envelope(&vec![0; n]).is_err());
+        }
+        assert!(decode_envelope(&[2]).is_err());
+        for bad in ["", "1.2.3", "1.2.3.4.5", "1..3.4", "256.2.3.4", "-1.2.3.4", "1.2.3. 4", "1.2.3.4\n", "１.2.3.4", "0000.2.3.4"] {
+            assert!(Ipv4::parse(bad).is_err(), "{bad}");
+        }
+        let payload = [0x31, 0x7c, 0x7c, 0x7c];
+        assert_eq!(system_envelope(&payload, true), [1, 0, 0x31, 0x7c, 0x7c, 0x7c]);
+        assert_eq!(decode_envelope(&[1, 1, 0x31]).unwrap(), Envelope::System(&[1, 0x31]));
+        let expected = "POST /UVService/ HTTP/1.1\r\nUser-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r\n\
+            Content-Type: application/octet-stream\r\nConnection: Keep-Alive\r\nContent-length: 8589934590\r\n\
+            Host: example.invalid:443\r\n\r\n";
+        assert_eq!(http_preamble("example.invalid:443"), expected.as_bytes());
     }
 
     #[test]

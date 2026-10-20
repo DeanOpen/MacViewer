@@ -99,3 +99,32 @@ jobs:
           name: MacViewer-macOS11-${{ github.sha }}
           path: dist/MacViewer-macOS11.zip
           retention-days: 14
+
+  linux:
+    name: LinuxViewer (Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: LinuxViewer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxkbcommon-dev libx11-dev libxcb1-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LinuxViewer
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linuxviewer-${{ github.sha }}
+          path: LinuxViewer/target/release/linuxviewer
+          retention-days: 14

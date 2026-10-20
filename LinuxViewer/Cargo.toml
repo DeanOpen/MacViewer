@@ -1,0 +1,37 @@
+[package]
+name = "linuxviewer"
+version = "0.1.0"
+edition = "2021"
+description = "UltraViewer-compatible remote desktop client and host for Linux (Rust port of MacViewer)"
+license = "MIT"
+
+[lib]
+name = "linuxviewer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "linuxviewer"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+cbc = { version = "0.1", features = ["alloc"] }
+des = "0.8"
+aes = "0.8"
+getrandom = "0.3"
+jpeg-decoder = { version = "0.3", default-features = false }
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+rpassword = "7"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+softbuffer = "0.4"
+winit = "0.30"
+zstd-safe = { version = "7", features = ["experimental"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["xtest", "randr"] }
+
+[profile.release]
+lto = "thin"
