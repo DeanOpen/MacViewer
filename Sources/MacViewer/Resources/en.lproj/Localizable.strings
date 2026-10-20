@@ -512,3 +512,7 @@
 "New ID" = "New ID";
 "UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one." = "UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one.";
 "A new ID could not be created: %@" = "A new ID could not be created: %@";
+"Connection security" = "Connection security";
+"Skip the relay certificate check" = "Skip the relay certificate check";
+"Only turn this on if connecting fails with a certificate error. While it is on, someone on your network could pose as the UltraViewer relay and see or change the session." = "Only turn this on if connecting fails with a certificate error. While it is on, someone on your network could pose as the UltraViewer relay and see or change the session.";
+"If this keeps happening, you can turn on “Skip the relay certificate check” in Settings." = "If this keeps happening, you can turn on “Skip the relay certificate check” in Settings.";

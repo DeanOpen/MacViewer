@@ -5,7 +5,7 @@ import UltraViewerProtocol
 func connectionErrorText(_ error: any Error) -> String {
     if case let FramedTCPTransport.Error.untrustedRelayCertificate(host, reason) = error {
         return LF("The UltraViewer relay assigned to this session (%@) has an invalid security certificate: %@. Try again later.",
-                  host, reason)
+                  host, reason) + " " + L("If this keeps happening, you can turn on “Skip the relay certificate check” in Settings.")
     }
     guard let network = error as? NWError else { return error.localizedDescription }
     switch network {

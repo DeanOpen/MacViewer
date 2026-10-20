@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import UltraViewerProtocol
@@ -156,4 +157,11 @@ private func directHex(_ text: String) -> Data {
         } catch { #expect(error as? TCPDirectPeerTransport.Error == .invalidLANAddress) }
         await listener.close()
     }
+}
+
+@Test func relayTrustAnchorIsSectigoRootR46() throws {
+    let der = RelayTrustAnchors.sectigoRootR46DER
+    let digest = SHA256.hash(data: der).map { String(format: "%02X", $0) }.joined()
+    #expect(digest == "7BB647A62AEEAC88BF257AA522D01FFEA395E0AB45C73F93F65654EC38F25A06")
+    #expect(RelayTrustAnchors.certificates.count == 1)
 }

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UltraViewerProtocol
 
 @main
 struct MacViewerApp: App {
@@ -68,6 +69,7 @@ struct MacViewerSettings: View {
     @AppStorage(SessionToolsModel.shareClipboardKey) private var shareClipboard = false
     @AppStorage(MacRegistrationProfile.displayNameKey) private var displayName = ""
     @AppStorage(ReceivedFilesFolder.key) private var receivedFolder = ""
+    @AppStorage(FramedTCPTransport.skipCertificateCheckKey) private var skipCertificateCheck = false
 
     var body: some View {
         TabView {
@@ -134,6 +136,11 @@ struct MacViewerSettings: View {
                     Text("Scroll speed")
                 }
                 LabeledRow("Scroll speed", value: String(format: "%.2g×", scrollSensitivity))
+            }
+            Section("Connection security") {
+                Toggle("Skip the relay certificate check", isOn: $skipCertificateCheck)
+                Text("Only turn this on if connecting fails with a certificate error. While it is on, someone on your network could pose as the UltraViewer relay and see or change the session.")
+                    .font(.caption).foregroundStyle(skipCertificateCheck ? .orange : .secondary)
             }
         }
         .groupedForm()

@@ -47,6 +47,9 @@ public actor FramedTCPTransport {
     private var identity = UUID()
     private var ready = false
     private let queue = DispatchQueue(label: "MacViewer.tcp")
+    /// When true, relay certificates that fail verification are accepted
+    /// anyway. Off by default; anyone on the network could pose as the relay.
+    public static let skipCertificateCheckKey = "MacViewer.skipRelayCertificateCheck"
     /// Why the latest open rejected its certificate, for the error message.
     private var certificateRejection = CertificateRejection()
     private var certificateHost = ""
@@ -174,18 +177,24 @@ public actor FramedTCPTransport {
     nonisolated static func verify(_ trust: SecTrust, name: String, rejection: CertificateRejection) -> Bool {
         let policy = SecPolicyCreateSSL(true, name as CFString)
         guard SecTrustSetPolicies(trust, policy) == errSecSuccess else {
+            if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
             rejection.reason = "its certificate could not be checked"
             return false
         }
+        // Keeps the system roots and adds the relays' root for older macOS.
+        SecTrustSetAnchorCertificates(trust, RelayTrustAnchors.certificates as CFArray)
+        SecTrustSetAnchorCertificatesOnly(trust, false)
         var error: CFError?
         if SecTrustEvaluateWithError(trust, &error) { return true }
         let firstReason = error.map(reasonText)
         guard SecTrustSetOptions(trust, [.allowExpired, .allowExpiredRoot]) == errSecSuccess else {
+            if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
             rejection.reason = firstReason
             return false
         }
         error = nil
         if SecTrustEvaluateWithError(trust, &error) { return true }
+        if UserDefaults.standard.bool(forKey: skipCertificateCheckKey) { return true }
         rejection.reason = error.map(reasonText) ?? firstReason
         return false
     }

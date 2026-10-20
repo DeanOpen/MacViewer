@@ -512,3 +512,7 @@
 "New ID" = "ID mới";
 "UltraViewer gives this Mac a new ID and password. The old ID stops working, and saved connections to this Mac need the new one." = "UltraViewer sẽ cấp cho máy Mac này ID và mật khẩu mới. ID cũ sẽ ngừng hoạt động, các kết nối đã lưu tới máy Mac này cần dùng ID mới.";
 "A new ID could not be created: %@" = "Không thể tạo ID mới: %@";
+"Connection security" = "Bảo mật kết nối";
+"Skip the relay certificate check" = "Bỏ qua kiểm tra chứng chỉ máy chủ chuyển tiếp";
+"Only turn this on if connecting fails with a certificate error. While it is on, someone on your network could pose as the UltraViewer relay and see or change the session." = "Chỉ bật khi kết nối báo lỗi chứng chỉ. Khi bật, người khác trong mạng của bạn có thể giả làm máy chủ chuyển tiếp UltraViewer để xem hoặc thay đổi phiên làm việc.";
+"If this keeps happening, you can turn on “Skip the relay certificate check” in Settings." = "Nếu lỗi này vẫn tiếp diễn, bạn có thể bật “Bỏ qua kiểm tra chứng chỉ máy chủ chuyển tiếp” trong Cài đặt.";
