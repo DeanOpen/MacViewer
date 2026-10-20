@@ -621,6 +621,7 @@ struct ConnectionView: View {
             Divider()
             }
             if let error = model.errorMessage { errorLabel(error).padding(16) }
+            if let notice = model.monitorNotice { monitorNoticeLabel(notice).padding(.horizontal, 16).padding(.vertical, 8) }
             HStack(spacing: 0) {
                 Group {
                     if let size = model.displayedSize, model.phase == .connected {
@@ -725,6 +726,11 @@ struct ConnectionView: View {
     private func errorLabel(_ text: String) -> some View {
         Label(L(text), systemImage: "exclamationmark.circle.fill")
             .font(.callout).foregroundColor(.red).fixedSize(horizontal: false, vertical: true)
+    }
+    /// `monitorNotice` is already localized when the model sets it.
+    private func monitorNoticeLabel(_ text: String) -> some View {
+        Label(text, systemImage: "display")
+            .font(.callout).foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
     }
 
     private func requestSideSwitch() {

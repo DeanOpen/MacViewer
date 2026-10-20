@@ -417,6 +417,111 @@ struct ConnectionModelTests {
         #expect(model.frame == nil && model.displayedFrame == nil && model.remoteCursor == nil)
     }
 
+    @Test("A monitor that does not fit the image shows all monitors with a visible notice")
+    func monitorGeometryMismatchNotice() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        let monitors = try RemoteControlCommands.monitors(from: Data("0:0:2:1|2:0:4:1|".utf8))
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true,
+                                                            monitors: monitors)))
+        adapter.events[0].yield(.frame(try makeFrame(width: 2, height: 1)))
+        try await settle { model.displayedFrame != nil }
+        // Monitor 2 starts at x = 2 in a 2-pixel-wide image, so its region cannot fit.
+        model.selectMonitor(2)
+        #expect(model.selectedMonitor == 2)
+        #expect(model.monitorNotice != nil)
+        #expect(model.displayedFrame?.image.width == 2) // full desktop, not a bogus crop
+        model.setControlEnabled(true)
+        model.send(.pointerMoved(x: 1, y: 0))
+        try await settle { adapter.inputs.last == .pointerMoved(x: 1, y: 0) } // no monitor offset
+        let status = AgentBridge.statusText(for: model, allowScreen: true, allowInput: true, allowConnect: false)
+        #expect(status.contains("Monitor notice:"))
+        // Once a frame big enough for the monitor arrives the notice clears.
+        adapter.events[0].yield(.frame(try makeFrame(width: 4, height: 1)))
+        try await settle { model.monitorNotice == nil }
+        #expect(model.displayedFrame?.image.width == 2)
+        model.selectMonitor(0)
+        #expect(model.monitorNotice == nil)
+        model.disconnect()
+    }
+
+    @Test("Monitor choice is remembered per partner and restored only while it exists")
+    func monitorSelectionPersistence() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        let monitors = try RemoteControlCommands.monitors(from: Data("0:0:2:1|2:0:4:1|".utf8))
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", monitors: monitors)))
+        try await settle { model.phase == .connected }
+        adapter.events[0].yield(.frame(try makeFrame(width: 4, height: 1)))
+        try await settle { model.displayedFrame != nil }
+        model.selectMonitor(2)
+        #expect(defaults.integer(forKey: ConnectionModel.selectedMonitorKey(for: "123456789")) == 2)
+        model.disconnect()
+
+        // The next connection to the same partner restores monitor 2.
+        model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 2 }
+        adapter.events[1].yield(.connected(RemoteSessionInfo(partnerID: "123456789", monitors: monitors)))
+        try await settle { model.phase == .connected }
+        #expect(model.selectedMonitor == 2)
+        adapter.events[1].yield(.frame(try makeFrame(width: 4, height: 1)))
+        try await settle { model.displayedFrame?.image.width == 2 }
+        model.disconnect()
+
+        // A stale saved index that no longer exists falls back to all monitors.
+        defaults.set(9, forKey: ConnectionModel.selectedMonitorKey(for: "123456789"))
+        model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 3 }
+        adapter.events[2].yield(.connected(RemoteSessionInfo(partnerID: "123456789", monitors: monitors)))
+        try await settle { model.phase == .connected }
+        #expect(model.selectedMonitor == 0)
+        model.disconnect()
+    }
+
+    @Test("A metadata-less screen refresh keeps the selected monitor")
+    func monitorSelectionSurvivesMetadataLessRefresh() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        let monitors = try RemoteControlCommands.monitors(from: Data("0:0:2:1|2:0:4:1|".utf8))
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", monitors: monitors)))
+        adapter.events[0].yield(.frame(try makeFrame(width: 4, height: 1)))
+        try await settle { model.displayedFrame != nil }
+        model.selectMonitor(2)
+        // A re-init without part 8 is missing metadata, not proof of one monitor.
+        adapter.events[0].yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: "123456789")))
+        try await settle { model.remoteInfo?.monitors.count == 2 }
+        #expect(model.selectedMonitor == 2)
+        #expect(model.displayedFrame?.image.width == 2)
+        #expect(model.monitorNotice == nil)
+        // A list that really no longer contains the monitor resets to all.
+        let onlyFirst = try RemoteControlCommands.monitors(from: Data("0:0:2:1|".utf8))
+        adapter.events[0].yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: "123456789", monitors: onlyFirst)))
+        try await settle { model.selectedMonitor == 0 }
+        model.disconnect()
+    }
+
+    @Test("Monitor menu rows include the virtual-desktop offset")
+    func monitorMenuPositionSuffix() throws {
+        let monitors = try RemoteControlCommands.monitors(from: Data("-1920:0:0:1080|0:0:2560:1440|".utf8))
+        #expect(monitors[0].menuPositionSuffix == " · (-1920, 0)")
+        #expect(monitors[1].menuPositionSuffix == " · (0, 0)")
+    }
+
     @Test("A delayed audio enable cannot override a later disable, and PCM is gated by active playback")
     func audioRevisionAndPlayback() async throws {
         let defaults = try isolatedDefaults()

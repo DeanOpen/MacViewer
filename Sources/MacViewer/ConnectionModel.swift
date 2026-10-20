@@ -37,6 +37,11 @@ final class ConnectionModel: ObservableObject {
     private static let recentPartnersKey = "MacViewer.recentPartners"
     private static let partnerNamesKey = "MacViewer.partnerNames"
 
+    /// Per-partner monitor choice; 0 means "all monitors". Kept on this Mac only.
+    static func selectedMonitorKey(for partnerID: String) -> String {
+        "MacViewer.selectedMonitor.\(partnerID)"
+    }
+
     @Published var partnerID = "" {
         didSet {
             guard Self.normalizeID(oldValue) != normalizedPartnerID, !isSessionActive else { return }
@@ -73,6 +78,10 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var displayedSize: CGSize?
     let screenFeed = RemoteScreenFeed()
     @Published private(set) var selectedMonitor = 0
+    /// Explains a selected monitor that cannot be cropped from the received
+    /// desktop image. The whole desktop is shown (and input is not offset), so
+    /// the UI must say this instead of silently claiming the monitor is active.
+    @Published private(set) var monitorNotice: String?
     @Published private(set) var recentPartners: [String]
     /// Local nicknames for partner IDs; never sent to the other computer.
     @Published private(set) var partnerNames: [String: String]
@@ -181,6 +190,7 @@ final class ConnectionModel: ObservableObject {
         remoteInfo = nil
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
+        monitorNotice = nil
         phase = .connecting
         status = "Connecting to \(identifier)…"
         let activeGeneration = UUID()
@@ -232,6 +242,7 @@ final class ConnectionModel: ObservableObject {
         frame = nil
         displayedFrame = nil
         selectedMonitor = 0
+        monitorNotice = nil
         remoteInfo = nil
         password = ""
     }
@@ -270,7 +281,21 @@ final class ConnectionModel: ObservableObject {
     func selectMonitor(_ index: Int) {
         releaseRemoteInput()
         selectedMonitor = index
+        rememberMonitorSelection()
         updateDisplayedFrame()
+    }
+
+    /// Keeps the last explicit choice for this partner, including "all monitors".
+    private func rememberMonitorSelection() {
+        guard let identifier = remoteInfo?.partnerID ?? (isSessionActive ? normalizedPartnerID : nil),
+              !identifier.isEmpty else { return }
+        defaults.set(selectedMonitor, forKey: Self.selectedMonitorKey(for: identifier))
+    }
+
+    /// The saved choice only applies while that monitor still exists.
+    private func savedMonitorSelection(for info: RemoteSessionInfo) -> Int {
+        let index = defaults.integer(forKey: Self.selectedMonitorKey(for: info.partnerID))
+        return index != 0 && info.monitors.contains(where: { $0.index == index }) ? index : 0
     }
 
     func performRemoteAction(_ action: RemoteControlCommands.Action) {
@@ -400,12 +425,28 @@ final class ConnectionModel: ObservableObject {
     }
 
     private func updateDisplayedFrame() {
-        guard let image = frame?.image else { displayedFrame = nil; updateRemoteCursor(); return }
-        if let region = selectedRegion,
+        guard let image = frame?.image else {
+            setMonitorNotice(nil)
+            displayedFrame = nil; updateRemoteCursor(); return
+        }
+        let region = selectedRegion
+        if selectedMonitor != 0, region == nil, remoteInfo?.monitors.isEmpty == false {
+            setMonitorNotice(LF("Monitor %ld does not fit the received desktop image, so all monitors are shown. Refresh the screen or reconnect, or select All monitors.",
+                                selectedMonitor))
+        } else {
+            setMonitorNotice(nil)
+        }
+        if let region,
            let cropped = image.cropping(to: CGRect(x: region.x, y: region.y, width: region.width, height: region.height)) {
             displayedFrame = RemoteScreenFrame(image: cropped)
         } else { displayedFrame = frame }
         updateRemoteCursor()
+    }
+
+    /// Assign only on change: an @Published write on every frame would rebuild
+    /// the whole session window while the notice is showing.
+    private func setMonitorNotice(_ notice: String?) {
+        if monitorNotice != notice { monitorNotice = notice }
     }
 
     private func updateRemoteCursor() {
@@ -469,6 +510,8 @@ final class ConnectionModel: ObservableObject {
             remoteInfo = info
             phase = .connected
             status = "Connected to \(info.displayName ?? info.partnerID)."
+            selectedMonitor = savedMonitorSelection(for: info)
+            monitorNotice = nil
             rememberPartner(info.partnerID)
             if defaults.bool(forKey: Self.computerAudioKey) { requestAudio(true, clearError: false) }
             if let pending = pendingCredential {
@@ -511,8 +554,22 @@ final class ConnectionModel: ObservableObject {
             updateDisplayedFrame()
         case let .screenGeometryChanged(info):
             guard phase == .connected else { return }
-            remoteInfo = info
-            if !info.monitors.contains(where: { $0.index == selectedMonitor }) { selectedMonitor = 0 }
+            let previous = remoteInfo
+            var merged = info
+            // A re-init that omits part 8 (monitor metadata) is not evidence that
+            // the host has no monitors. Keep the last list and origin so the
+            // user's selected monitor keeps cropping instead of silently
+            // jumping back to the whole desktop.
+            if merged.monitors.isEmpty, let previous, !previous.monitors.isEmpty {
+                merged.monitors = previous.monitors
+                merged.virtualLeft = previous.virtualLeft
+                merged.virtualTop = previous.virtualTop
+            }
+            remoteInfo = merged
+            if !merged.monitors.isEmpty,
+               !merged.monitors.contains(where: { $0.index == selectedMonitor }) {
+                selectedMonitor = 0
+            }
             updateDisplayedFrame()
         case let .inputPermissionChanged(allowed):
             guard phase == .connected else { return }
@@ -579,6 +636,7 @@ final class ConnectionModel: ObservableObject {
         errorMessage = connectionErrorText(error)
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
+        monitorNotice = nil
         remoteInfo = nil
     }
 
@@ -595,6 +653,7 @@ final class ConnectionModel: ObservableObject {
         status = message
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
+        monitorNotice = nil
         remoteInfo = nil
     }
 

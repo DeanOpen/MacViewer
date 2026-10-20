@@ -62,9 +62,36 @@ import Testing
     }
 }
 
+@Test func remoteMonitorsTolerateOnlyATrailingNulRun() throws {
+    let monitors = try RemoteControlCommands.monitors(from: Data("0:0:1920:1080|\0\0".utf8))
+    #expect(monitors.count == 1 && monitors[0].right == 1920)
+    // Only NULs *after* the payload are tolerated; an embedded NUL or any other
+    // byte still makes the whole string invalid.
+    for text in ["\00:0:1920:1080|", "0:0:1920:1080|\0 ", "0:0:1920:1080|\00|"] {
+        #expect(throws: RemoteControlCommands.Error.malformedMonitorInformation) {
+            try RemoteControlCommands.monitors(from: Data(text.utf8))
+        }
+    }
+}
+
+@Test func remoteEffectiveVirtualOriginCoversDeclaredOriginAndMonitorEdges() throws {
+    let monitors = try RemoteControlCommands.monitors(from: Data("-1920:0:0:1080|0:-200:2560:1240|".utf8))
+    #expect(RemoteControlCommands.effectiveVirtualOrigin(declaredLeft: 0, declaredTop: 0,
+                                                         monitors: monitors) == (left: -1920, top: -200))
+    #expect(RemoteControlCommands.effectiveVirtualOrigin(declaredLeft: -1920, declaredTop: -200,
+                                                         monitors: monitors) == (left: -1920, top: -200))
+    #expect(RemoteControlCommands.effectiveVirtualOrigin(declaredLeft: 10, declaredTop: 20,
+                                                         monitors: []) == (left: 10, top: 20))
+    // Int32.min monitor edges stay well-defined without underflow.
+    let minimum = try RemoteControlCommands.monitors(
+        from: Data("-2147483648:0:-2147483647:1|".utf8))
+    #expect(RemoteControlCommands.effectiveVirtualOrigin(declaredLeft: Int32.max, declaredTop: Int32.max,
+                                                         monitors: minimum) == (left: Int32.min, top: 0))
+}
+
 @Test func remoteMonitorsRejectMalformedRecordsAndOutOfBoundsGeometry() {
     for text in ["Mac|", "0:0:1920:1080", "0:0:1920|", "0:0:1920:1080||", "0:0:1:1:2|",
-                 "0:0:2147483648:1|", "0:0:1:1|\0", "0: 0:1:1|"] {
+                 "0:0:2147483648:1|", "0: 0:1:1|"] {
         #expect(throws: RemoteControlCommands.Error.malformedMonitorInformation) {
             try RemoteControlCommands.monitors(from: Data(text.utf8))
         }

@@ -104,6 +104,8 @@
 "Release pressed keys and buttons" = "Release pressed keys and buttons";
 "Monitor" = "Monitor";
 "All monitors" = "All monitors";
+"Monitor %ld does not fit the received desktop image, so all monitors are shown. Refresh the screen or reconnect, or select All monitors." = "Monitor %ld does not fit the received desktop image, so all monitors are shown. Refresh the screen or reconnect, or select All monitors.";
+"The remote desktop is larger than this viewer supports. Select a single monitor in UltraViewer on the Windows computer or lower the desktop resolution, then reconnect." = "The remote desktop is larger than this viewer supports. Select a single monitor in UltraViewer on the Windows computer or lower the desktop resolution, then reconnect.";
 "Display size" = "Display size";
 "Fit to window" = "Fit to window";
 "Actual size (100%)" = "Actual size (100%)";

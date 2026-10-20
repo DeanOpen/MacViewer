@@ -97,7 +97,11 @@ public enum RemoteControlCommands {
 
     /// Command0 part8: each monitor is left:top:right:bottom followed by '|'.
     /// Monitor selection crops the virtual desktop locally; it sends no command.
+    /// A C/C++ host may terminate its buffer with a run of NUL bytes; only that
+    /// trailing run is ignored. Every other byte stays strictly validated.
     public static func monitors(from payload: Data, maximumMonitors: Int = 64) throws -> [RemoteMonitor] {
+        var payload = payload
+        while payload.last == 0 { payload.removeLast() }
         guard payload.count <= 16_384, maximumMonitors > 0,
               payload.allSatisfy({ $0 == 45 || $0 == 58 || $0 == 124 || (48...57).contains($0) }) else {
             throw Error.malformedMonitorInformation
@@ -122,6 +126,22 @@ public enum RemoteControlCommands {
             return RemoteMonitor(index: index + 1, left: numbers[0], top: numbers[1],
                                  right: numbers[2], bottom: numbers[3])
         }
+    }
+
+    /// Desktop origin shared by monitor crops, visible cursor coordinates and
+    /// reverse input offsets. A host may omit its declared origin (parts 9/10)
+    /// or declare it to the right/below a monitor rectangle, so the minimum of
+    /// the declared origin and every monitor edge is used. Int64 math keeps
+    /// Int32.min/Int32.max inputs well-defined; the result is Int32-clamped.
+    public static func effectiveVirtualOrigin(declaredLeft: Int32, declaredTop: Int32,
+                                              monitors: [RemoteMonitor]) -> (left: Int32, top: Int32) {
+        var left = Int64(declaredLeft)
+        var top = Int64(declaredTop)
+        for monitor in monitors {
+            left = min(left, Int64(monitor.left))
+            top = min(top, Int64(monitor.top))
+        }
+        return (left: Int32(clamping: left), top: Int32(clamping: top))
     }
 
     private static func ascii(_ text: String) -> Message {

@@ -214,6 +214,9 @@ final class AgentBridge: ObservableObject, MCPToolHost {
                 return .error("There is no monitor \(index). See session_status.")
             }
             model.selectMonitor(index)
+            // Coordinates from any screenshot taken before this switch must not be
+            // silently rescaled onto a differently sized monitor image.
+            screenshotScale = 1
             return .text(index == 0 ? "Showing all monitors. Take a new screenshot." : "Showing monitor \(index). Take a new screenshot.")
         case "click", "move_mouse", "drag", "scroll", "type_text", "press_keys", "remote_action":
             if let refusal = inputRefusal() { return .error(refusal) }
@@ -254,6 +257,15 @@ final class AgentBridge: ObservableObject, MCPToolHost {
     private static let connectDenied = "Starting or ending connections is turned off. The user can allow it in MacViewer › Settings › AI Agents."
 
     private func status() -> MCPToolResult {
+        .text(Self.statusText(for: model, allowScreen: allowScreen,
+                              allowInput: allowInput, allowConnect: allowConnect))
+    }
+
+    /// The text behind the `session_status` tool. Kept separate so its content
+    /// (including `monitorNotice`) is testable without starting the MCP server.
+    @MainActor
+    static func statusText(for model: ConnectionModel, allowScreen: Bool,
+                           allowInput: Bool, allowConnect: Bool) -> String {
         var lines = ["Phase: \(model.phase.title)"]
         if let info = model.remoteInfo {
             lines.append("Partner: \(info.displayName ?? info.partnerID) (ID \(info.partnerID))")
@@ -263,6 +275,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
                 lines.append("Monitor \(monitor.index): \(monitor.width)×\(monitor.height)")
             }
             lines.append("Selected monitor: \(model.selectedMonitor == 0 ? "all" : String(model.selectedMonitor))")
+            if let notice = model.monitorNotice { lines.append("Monitor notice: \(notice)") }
             if let image = model.displayedFrame?.image { lines.append("Screen size: \(image.width)×\(image.height)") }
             lines.append("Clipboard sharing: \(model.tools.clipboardEnabled ? "on" : "off")")
         } else {
@@ -270,7 +283,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         }
         lines.append("Agents may: view screen \(allowScreen ? "yes" : "no"), control \(allowInput ? "yes" : "no"), connect/disconnect \(allowConnect ? "yes" : "no")")
         if !model.recentPartners.isEmpty { lines.append("Recent partner IDs: \(model.recentPartners.joined(separator: ", "))") }
-        return .text(lines.joined(separator: "\n"))
+        return lines.joined(separator: "\n")
     }
 
     private func connect(_ arguments: JSONValue) async -> MCPToolResult {
