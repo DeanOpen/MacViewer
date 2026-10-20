@@ -27,7 +27,8 @@ if [[ -z "$signing_identity" ]]; then
 fi
 
 # CI sets these; local builds keep the current development values.
-app_version="${MACVIEWER_VERSION:-0.3.7}"
+latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+app_version="${MACVIEWER_VERSION:-${${latest_tag#v}:-0.0.0}}"
 build_number="${MACVIEWER_BUILD_NUMBER:-5}"
 minimum_system_version="${MACVIEWER_MIN_MACOS:-12}.0"
 build_flags=(--configuration "$configuration")
@@ -94,6 +95,8 @@ cat > "$app_directory/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+# Finder metadata (com.apple.FinderInfo) on the bundle fails strict signature checks.
+xattr -cr "$app_directory"
 codesign --force --sign "$signing_identity" --timestamp=none "$app_directory/Contents/MacOS/macviewer-mcp"
 codesign --force --sign "$signing_identity" --timestamp=none "$app_directory"
 codesign --verify --deep --strict "$app_directory"
