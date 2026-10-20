@@ -173,6 +173,9 @@ claude mcp add --scope user macviewer -- /Applications/MacViewer.app/Contents/Ma
   với ứng dụng qua socket cục bộ mà chỉ tài khoản của bạn mở được.
 - Trợ lý chỉ dùng được chuột, bàn phím khi bạn bật **Điều khiển**. Muốn trợ lý tự
   kết nối hoặc ngắt kết nối thì phải bật quyền riêng cho việc đó.
+- Trợ lý chỉ xem được màn hình, đọc chat và đọc clipboard khi bạn cho phép xem màn hình;
+  muốn trợ lý ghi clipboard thì phải bật **Điều khiển**. Bấm **Dừng** sẽ chặn mọi thao tác
+  của trợ lý (trừ xem trạng thái phiên) cho tới khi phiên kết thúc.
 - MacViewer hỏi bạn trước khi một trợ lý mới thao tác. Khi trợ lý đang điều khiển,
   cửa sổ phiên hiện **AI đang điều khiển · Dừng**.
 - Trước khi sửa tệp cấu hình của ứng dụng, MacViewer lưu một bản `.macviewer-backup`.
