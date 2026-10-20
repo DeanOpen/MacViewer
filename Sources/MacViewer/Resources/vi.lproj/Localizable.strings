@@ -534,3 +534,6 @@
 "The master password could not be saved." = "Không lưu được mật khẩu chủ.";
 "The master password could not be saved: %@" = "Không lưu được mật khẩu chủ: %@";
 "Connected with the master password" = "Kết nối bằng mật khẩu chủ";
+"Incoming connections" = "Kết nối đến";
+"Allow all connections without asking" = "Cho phép mọi kết nối mà không cần hỏi";
+"Skips the approval prompt. Anyone with this Mac’s ID and password can see and control it while sharing is on." = "Bỏ qua lời nhắc phê duyệt. Bất kỳ ai có ID và mật khẩu của máy Mac này đều xem và điều khiển được máy khi đang bật chia sẻ.";

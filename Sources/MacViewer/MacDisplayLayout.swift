@@ -64,19 +64,24 @@ struct MacDisplayLayout: Equatable, Sendable {
             throw MacScreenCaptureError.displayUnavailable
         }
         let bounds = selected.dropFirst().reduce(selected[0].bounds) { $0.union($1.bounds) }
-        let backingScale = selected.map {
-            max(Double($0.pixelWidth) / $0.bounds.width, Double($0.pixelHeight) / $0.bounds.height)
+        let backingScale: Double = selected.map { display -> Double in
+            max(Double(display.pixelWidth) / Double(display.bounds.width), Double(display.pixelHeight) / Double(display.bounds.height))
         }.max() ?? 1
         let maxWidth = selected.count > 1 ? 3840.0 : 1920.0
         let maxHeight = selected.count > 1 ? 2160.0 : 1080.0
         let scale = min(backingScale, min(maxWidth / bounds.width, maxHeight / bounds.height))
         let width = max(1, Int((bounds.width * scale).rounded(.down)))
         let height = max(1, Int((bounds.height * scale).rounded(.down)))
+        // Explicit Double steps keep older compilers from timing out on the inference.
+        func pixel(_ point: CGFloat, from origin: CGFloat, over length: CGFloat, pixels: Int) -> Int {
+            let fraction: Double = Double(point - origin) / Double(length)
+            return Int((fraction * Double(pixels)).rounded())
+        }
         let surfaces = try selected.map { display -> Surface in
-            let left = Int(((display.bounds.minX - bounds.minX) / bounds.width * Double(width)).rounded())
-            let top = Int(((display.bounds.minY - bounds.minY) / bounds.height * Double(height)).rounded())
-            let right = Int(((display.bounds.maxX - bounds.minX) / bounds.width * Double(width)).rounded())
-            let bottom = Int(((display.bounds.maxY - bounds.minY) / bounds.height * Double(height)).rounded())
+            let left = pixel(display.bounds.minX, from: bounds.minX, over: bounds.width, pixels: width)
+            let top = pixel(display.bounds.minY, from: bounds.minY, over: bounds.height, pixels: height)
+            let right = pixel(display.bounds.maxX, from: bounds.minX, over: bounds.width, pixels: width)
+            let bottom = pixel(display.bounds.maxY, from: bounds.minY, over: bounds.height, pixels: height)
             guard left >= 0, top >= 0, right > left, bottom > top, right <= width, bottom <= height else {
                 throw MacScreenCaptureError.invalidFrame
             }
