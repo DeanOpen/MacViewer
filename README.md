@@ -12,10 +12,10 @@
 
 Bản mới nhất, macOS 12 trở lên
 
-[![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
+[![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
+![Platform](https://img.shields.io/badge/platform-macOS%2012%2B-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 
 <img src="docs/images/main-window-vi.png" width="820" alt="Giao diện chính của MacViewer">
