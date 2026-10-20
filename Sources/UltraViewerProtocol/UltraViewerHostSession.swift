@@ -68,6 +68,9 @@ public actor UltraViewerHostSession {
         public var chatMessagesReceived = 0
         public var clipboardMessagesSent = 0
         public var clipboardMessagesReceived = 0
+        /// Realtime events dropped because the UI consumer fell behind.
+        public var droppedRealtimeEvents = 0
+        public var droppedInputEvents = 0
     }
     public enum Failure: Swift.Error, LocalizedError {
         case alreadyRunning, notConnected, relayUnavailable, timedOut, slowConsumer, unsupportedDisplay
@@ -130,6 +133,11 @@ public actor UltraViewerHostSession {
     private let pacing = HostCapturePacing.standard
     private var waitingForAck = false
     private var captureTicket: UUID?
+    /// One coalesced pointer move waiting for the next delivery slot. A burst
+    /// of Windows mouse moves keeps only the newest position.
+    private var pendingPointerMove: (session: UUID, payload: Data)?
+    private var pointerMoveFlushTask: Task<Void, Never>?
+    private var droppedInputTracker = HostDroppedInputTracker()
     public private(set) var diagnostics = Diagnostics()
 
     public init() {}
@@ -141,7 +149,10 @@ public actor UltraViewerHostSession {
         self.configuration = configuration
         diagnostics = Diagnostics(); running = true
         let token = UUID(); generation = token
-        let pair = AsyncThrowingStream<Event, any Swift.Error>.makeStream(bufferingPolicy: .bufferingOldest(128))
+        // The host UI consumer can stall (permission prompt, modal file panel,
+        // hot-plug). Realtime events are dropped under that pressure, so the
+        // buffer only has to absorb bursts of state events.
+        let pair = AsyncThrowingStream<Event, any Swift.Error>.makeStream(bufferingPolicy: .bufferingOldest(256))
         events = pair.continuation
         pair.continuation.onTermination = { [weak self] _ in Task { await self?.stop(ifGeneration: token) } }
         commandTask = Task { [weak self] in await self?.openCommand(token) }
@@ -516,7 +527,7 @@ public actor UltraViewerHostSession {
                   (payload.starts(with: Data("8|||".utf8)) || payload.starts(with: Data([30, 124, 124, 124]))) {
             guard payload.count <= 4096 else { return }
             diagnostics.inputMessages += 1
-            try emit(.input(session: peer.request.id, payload: payload))
+            try deliverInput(session: peer.request.id, payload: payload)
         }
     }
 
@@ -565,7 +576,10 @@ public actor UltraViewerHostSession {
         let data = try HostedScreenMessage.fullFrame(frame, sequence: nextSequence)
         guard nextSequence < Int32.max else { throw Failure.unsupportedDisplay }
         nextSequence += 1; waitingForAck = true; lastFrame = frame
-        armViewerDeadline(token: generation, request: peer.request.id, seconds: 20)
+        // A multi-megabyte frame needs more than the base deadline on a slow but
+        // progressing uplink; never disconnect mid-frame.
+        armViewerDeadline(token: generation, request: peer.request.id,
+                          seconds: HostViewerDeadline.seconds(forFrameBytes: data.count))
         try await send(data, route: peer.route)
         diagnostics.framesSent += 1
     }
@@ -628,6 +642,8 @@ public actor UltraViewerHostSession {
         waitingForAck = false; captureTicket = nil; pendingFrame = nil; lastFrame = nil
         cancelViewerDeadline()
         captureTimer?.cancel(); captureTimer = nil
+        cancelPendingPointerMove()
+        droppedInputTracker.reset()
         try? emit(.releaseInput)
         if old != nil { try? emit(.viewerEnded(reason)) }
         if let old { try? await send(MultipartPayload.encode([Data([27])]), route: old.route) }
@@ -672,13 +688,84 @@ public actor UltraViewerHostSession {
     }
 
     private func emit(_ event: Event) throws {
+        // A coalesced pointer move must never overtake a later click, key or
+        // state event: deliver the newest position first, in order.
+        if !Self.isPointerMoveEvent(event) { try flushPendingPointerMove() }
+        try publish(event)
+    }
+
+    /// Raw stream delivery under the host drop policy: dropping a realtime event
+    /// never ends the session; dropping a state event still does, because the UI
+    /// would otherwise miss a lifecycle transition.
+    private func publish(_ event: Event) throws {
         switch events?.yield(event) {
-        case .dropped:
-            events?.finish(throwing: Failure.slowConsumer)
-            throw Failure.slowConsumer
-        case .terminated: throw CancellationError()
-        default: break
+        case .some(.dropped):
+            switch HostEventDelivery.delivery(for: event) {
+            case .critical:
+                events?.finish(throwing: Failure.slowConsumer)
+                throw Failure.slowConsumer
+            case .realtime:
+                diagnostics.droppedRealtimeEvents += 1
+                if case .input = event {
+                    diagnostics.droppedInputEvents += 1
+                    if droppedInputTracker.droppedInputNeedsRelease() {
+                        // Best effort: ask the local injector to release anything
+                        // that may still be held. Losing this hint is harmless.
+                        _ = events?.yield(.releaseInput)
+                    }
+                }
+            }
+        case .some(.terminated):
+            throw CancellationError()
+        case .some(.enqueued):
+            if case .input = event { droppedInputTracker.didDeliverInput() }
+        case .none:
+            // Session is finishing; no consumer remains to deliver to.
+            return
+        @unknown default:
+            return
         }
+    }
+
+    /// Queues a pointer move for coalescing, or delivers any other input at once.
+    private func deliverInput(session: UUID, payload: Data) throws {
+        if HostInputCoalescing.isPointerMovePayload(payload) {
+            pendingPointerMove = (session, payload)
+            schedulePointerMoveFlush()
+            return
+        }
+        try emit(.input(session: session, payload: payload))
+    }
+
+    private func schedulePointerMoveFlush() {
+        pointerMoveFlushTask?.cancel()
+        let token = generation
+        pointerMoveFlushTask = Task { [weak self] in
+            do { try await Task.sleep(seconds: HostInputCoalescing.pointerMoveFlushDelay) } catch { return }
+            await self?.flushPointerMove(token: token)
+        }
+    }
+
+    private func flushPointerMove(token: UUID) {
+        guard generation == token else { return }
+        try? flushPendingPointerMove()
+    }
+
+    private func flushPendingPointerMove() throws {
+        pointerMoveFlushTask?.cancel(); pointerMoveFlushTask = nil
+        guard let pending = pendingPointerMove else { return }
+        pendingPointerMove = nil
+        try publish(.input(session: pending.session, payload: pending.payload))
+    }
+
+    private func cancelPendingPointerMove() {
+        pointerMoveFlushTask?.cancel(); pointerMoveFlushTask = nil
+        pendingPointerMove = nil
+    }
+
+    private static func isPointerMoveEvent(_ event: Event) -> Bool {
+        guard case let .input(_, payload) = event else { return false }
+        return HostInputCoalescing.isPointerMovePayload(payload)
     }
 
     private func finish(_ error: (any Swift.Error)?) async {
@@ -691,6 +778,8 @@ public actor UltraViewerHostSession {
         relayDeadline?.cancel(); relayDeadline = nil
         cancelViewerDeadline()
         captureTimer?.cancel(); captureTimer = nil
+        cancelPendingPointerMove()
+        droppedInputTracker.reset()
         controlAllowed = false; peer = nil; peerPhase = .none
         sessionToolsGate.reset()
         sideSwitch.reset()
@@ -765,6 +854,76 @@ enum HostFrameNumberPolicy {
         case .freshApproval, .viewerRelogin: return true
         case .displayLayoutChange: return false
         }
+    }
+}
+
+/// Which host session events may be dropped when the UI consumer falls behind.
+/// Realtime events are superseded by the next one (a dropped position or
+/// progress tick loses nothing); state events are lifecycle transitions and
+/// must keep their fatal slow-consumer behaviour.
+enum HostEventDelivery: Sendable, Equatable {
+    case critical
+    case realtime
+
+    static func delivery(for event: UltraViewerHostSession.Event) -> HostEventDelivery {
+        switch event {
+        case .input, .typing, .fileProgress:
+            return .realtime
+        case .status, .registered, .request, .connected, .captureRequested, .releaseInput,
+             .viewerEnded, .chat, .clipboard, .fileOffer, .fileCompleted, .fileCanceled,
+             .fileFailed, .sideSwitchRequested:
+            return .critical
+        }
+    }
+}
+
+/// At most one `.releaseInput` hint per contiguous burst of dropped input: if the
+/// consumer resumes and accepts input again, the next drop may ask for a release
+/// again. A dropped move alone does not imply held keys, but the host cannot tell
+/// which event was dropped, so one conservative hint is enough.
+struct HostDroppedInputTracker: Equatable, Sendable {
+    private var announcedRelease = false
+
+    mutating func didDeliverInput() { announcedRelease = false }
+
+    /// True the first time input is dropped after input was last delivered.
+    mutating func droppedInputNeedsRelease() -> Bool {
+        guard !announcedRelease else { return false }
+        announcedRelease = true
+        return true
+    }
+
+    mutating func reset() { announcedRelease = false }
+}
+
+/// Coalesces a burst of Windows pointer-move messages into one queued position.
+/// `8|||512|||...` is the recovered mouse-move text form; every other input
+/// payload is delivered immediately to preserve click/key ordering.
+enum HostInputCoalescing {
+    /// Long enough to merge a burst of moves between two UI consumer turns,
+    /// short enough that pointer motion still looks continuous.
+    static let pointerMoveFlushDelay: TimeInterval = 0.008
+    private static let pointerMovePrefix = Data("8|||512|||".utf8)
+
+    static func isPointerMovePayload(_ payload: Data) -> Bool {
+        payload.starts(with: pointerMovePrefix)
+    }
+}
+
+/// Viewer acknowledgment deadline scaled by frame size: base 20 s plus the time
+/// needed to move the frame over a slow-but-progressing uplink. Prevents a
+/// multi-megabyte frame from being interrupted on a congested relay.
+enum HostViewerDeadline {
+    static let baseSeconds = 20
+    /// Conservative floor for a link that still makes progress.
+    static let minimumThroughputBytesPerSecond = 256 * 1024
+    static let maximumSeconds = 180
+
+    static func seconds(forFrameBytes bytes: Int) -> Int {
+        let transfer = Double(max(0, bytes)) / Double(minimumThroughputBytesPerSecond)
+        let seconds = Double(baseSeconds) + transfer
+        let clamped = min(Double(maximumSeconds), seconds)
+        return max(baseSeconds, Int(clamped.rounded(.up)))
     }
 }
 

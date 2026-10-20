@@ -11,6 +11,10 @@ import UltraViewerProtocol
         == .mouse(.button(.leftDown, wParam: 1, lParam: -1245194)))
     #expect(try MacHostInputMessage.decode(Data("8|||522|||-7864312|||-1245194".utf8))
         == .mouse(.verticalWheel(wParam: -7864312, lParam: -1245194)))
+    // 0x20e (tilt wheel) is decoded so it is not an unknown message; host-side
+    // injection of the horizontal axis is a documented follow-up (audit H10).
+    #expect(try MacHostInputMessage.decode(Data("8|||526|||7864320|||0".utf8))
+        == .mouse(.horizontalWheel(wParam: 7864320, lParam: 0)))
     #expect(try MacHostInputMessage.decode(Data("20".utf8)) == nil)
     #expect(try MacHostInputMessage.decode(Data("8|||258|||65|||0".utf8)) == nil)
     for text in ["8|||512|||0|||1", "8|||513|||0|||1|||2", "8|||512|||0|||2147483648|||1",

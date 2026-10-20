@@ -252,6 +252,8 @@ final class SessionToolsModel: ObservableObject {
         let token = generation, revision = clipboardGeneration
         let change = pasteboard.changeCount
         guard change != clipboardChange else { return }
+        let previousChange = clipboardChange
+        let previousText = latestClipboardText
         clipboardChange = change
         guard let text = pasteboard.string(forType: .string), text != latestClipboardText else { return }
         guard text.utf16.count <= 524_288 else {
@@ -263,6 +265,10 @@ final class SessionToolsModel: ObservableObject {
             if generation == token, clipboardGeneration == revision { recordClipboard(text, outgoing: true) }
         } catch {
             guard generation == token, clipboardGeneration == revision, !Task.isCancelled else { return }
+            // Keep the failed text eligible for the next poll: a transient send
+            // failure must not require the user to copy again.
+            clipboardChange = previousChange
+            latestClipboardText = previousText
             errorMessage = "Clipboard text could not be sent."
         }
     }
