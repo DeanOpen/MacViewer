@@ -31,7 +31,8 @@ enum RelayTrustAnchors {
         "LvKRRFHQV80MNNVIIb/bE/FmJUNS0nAiNs2fxBx1IK1jcmMGDw4nztJqDby1ORrp0XZ60Vzk50lJLVU3aPAaOpg+VBeHVOmm" +
         "J1CJeyAvP/+/oYtKR5j/K3tJPsMpRmAYQqszKbrAKbkTidOIijlBO8n9pu0f9GBj39ItVQGL")!
 
-    static let certificates: [SecCertificate] = [
-        SecCertificateCreateWithData(nil, sectigoRootR46DER as CFData)!
-    ]
+    /// Computed: `SecCertificate` isn't `Sendable` in older SDKs, so it can't be a static constant.
+    static var certificates: [SecCertificate] {
+        [SecCertificateCreateWithData(nil, sectigoRootR46DER as CFData)!]
+    }
 }
