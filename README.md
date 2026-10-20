@@ -80,9 +80,9 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 
 ### Chưa hỗ trợ
 
-Nói chuyện qua micro, phát âm thanh khi chia sẻ máy Mac và truy cập không cần người ngồi máy. Chưa thử
-nghiệm với các bản UltraViewer cũ, bàn phím không phải kiểu US, bộ gõ ngoài
-tiếng Việt và tiếng Trung, và chế độ màu 8-bit.
+Nói chuyện qua micro, phát âm thanh khi chia sẻ máy Mac và truy cập không cần người ngồi máy. Khi
+chia sẻ máy Mac, ảnh chưa được gửi ở độ phân giải Retina 2x. Chưa thử nghiệm với các bản UltraViewer
+cũ, bàn phím không phải kiểu US, bộ gõ ngoài tiếng Việt và tiếng Trung, và chế độ màu 8-bit.
 
 ## Cài đặt
 
@@ -133,6 +133,12 @@ Khi chia sẻ tất cả, dùng menu màn hình của UltraViewer trên Windows 
 từng màn hình hoặc toàn bộ màn hình. Lựa chọn được ghi nhớ trên máy Mac.
 Nếu màn hình đã chọn bị ngắt kết nối, phiên chia sẻ dừng thay vì tự chuyển
 sang một màn hình khác.
+
+Ảnh chia sẻ được giới hạn kích thước để tiết kiệm băng thông: khoảng 2 triệu
+điểm ảnh khi chia sẻ một màn hình (tương đương 1920 × 1080) và khoảng 8 triệu
+điểm ảnh khi chia sẻ nhiều màn hình (tương đương 3840 × 2160), giữ đúng tỉ lệ
+và vị trí của từng màn hình. Màn hình Retina được gửi ở độ phân giải logic
+thay vì ảnh 2x, nên phiên không tốn gấp đôi băng thông.
 
 Chat và truyền file hoạt động ở cả hai chiều kết nối. File đến chỉ được lưu
 sau khi bấm **Lưu** và không ghi đè file có sẵn. Trường tên file của UltraViewer

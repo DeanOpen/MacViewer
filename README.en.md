@@ -83,9 +83,9 @@ Windows executable code.
 
 ### Not supported yet
 
-Microphone/voice chat, Mac-host audio, and unattended Mac access. Older Windows UltraViewer versions,
-non-US keyboard layouts, input methods other than Vietnamese and Chinese,
-and 8-bit screen mode haven't been validated.
+Microphone/voice chat, Mac-host audio, and unattended Mac access. Mac screen sharing does not send 2x
+Retina images. Older Windows UltraViewer versions, non-US keyboard layouts, input methods other than
+Vietnamese and Chinese, and 8-bit screen mode haven't been validated.
 
 ## Installation
 
@@ -133,6 +133,12 @@ displays**. With all displays shared, use UltraViewer's monitor menu on Windows
 to switch between individual displays and the combined desktop. Display choice
 is remembered on this Mac; if a selected display is disconnected, sharing stops
 instead of switching to a different display.
+
+The shared image is size-limited to save bandwidth: about 2 million pixels when
+sharing one display (roughly 1920 × 1080) and about 8 million pixels when
+sharing multiple displays (roughly 3840 × 2160), preserving each display's
+aspect ratio and position. Retina displays are sent at their logical resolution
+rather than 2x, so a session does not use twice the bandwidth.
 
 Chat and file transfer work in both session roles. Incoming files are written
 only after **Save** and never overwrite an existing file. UltraViewer's native
