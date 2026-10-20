@@ -143,8 +143,8 @@ Severity: **P0** breaks a core workflow, **P1** major quality/usability, **P2** 
 
 ## I. Proposed follow-up priorities
 
-1. **Partial frame updates** (delta rectangles/scroll/image cache) and honouring the viewer quality preset — the only way to raise fps without proportional bandwidth. Needs a Windows peer.
-2. **Move encode/decode off the session actor / MainActor** to reduce control latency during heavy screen updates.
+1. **Partial frame updates** — **phase 1 implemented in #14**: single dirty rectangle on the existing message shape, host encoder actor, quality pacing (legacy until `31|||N`). Measured 4K: full encode 10.3 ms / 15.82 MiB vs a one-pixel edit 2,115 B (0.013 %); multi-rectangle/copy/scroll/cache and a real Windows viewer check remain.
+2. **Move encode/decode off the session actor / MainActor** — **implemented in #14**: host encode on a frame-encoder actor, composite on a detached task, viewer zstd decompression off the relay actor with ACK-after-apply preserved.
 3. **Host cursor feedback** (CursorMessage 3/4/5 or frame cursor), especially macOS 12–13.
 4. **Power assertion while streaming** and pause (not end) on display sleep; duplicate-viewer rejection.
 5. **Non-BMP text**, Caps Lock Mac→Windows, Windows Actions/special keys, horizontal-wheel injection, Ctrl↔Cmd option, dead-key composition, local-pointer hiding, clipboard paste flush, chat-window cleanup, C6 edge accuracy.
@@ -161,11 +161,11 @@ Severity: **P0** breaks a core workflow, **P1** major quality/usability, **P2** 
 
 ## K. Detailed proposals for the three highest-impact open items
 
-These are the proposals that are deliberately **not** implemented in #10/#11/#12 yet. They either need a Windows peer capture (K1, K3) or a dedicated performance change (K2), so they are written here as implementation plans rather than speculative patches.
+These are the proposals that were deliberately **not** implemented in #10/#11/#12. Update: **K1 phase 1 and K2 are implemented in #14** (see the status notes below); K1 phase 2 (multi-rectangle/copy/scroll/cache) and K3 still need a Windows peer capture.
 
 ### K1. Partial frame updates + honouring the viewer quality preset
 
-**Problem.** The host sends the whole canvas on every frame. On a 4K desktop that is 16.6 MB of RGB555 before compression; measured zstd level-1 encoding alone is ~32 ms, and the uplink becomes the frame-rate ceiling (a 1 Gbps link needs ~0.13 s per frame; 5 Mbps needs ~26 s). A static screen changes nothing yet still pays the full cost, and the viewer's quality preset is ignored: the host only parses `32|||1` and has no handler for `31|||N` (quality 0–100) or `32|||2`.
+**Status (updated).** Phase 1 implemented in #14; phase 2 remains open. **Problem.** The host sends the whole canvas on every frame. On a 4K desktop that is 16.6 MB of RGB555 before compression; measured zstd level-1 encoding alone is ~32 ms, and the uplink becomes the frame-rate ceiling (a 1 Gbps link needs ~0.13 s per frame; 5 Mbps needs ~26 s). A static screen changes nothing yet still pays the full cost, and the viewer's quality preset is ignored: the host only parses `32|||1` and has no handler for `31|||N` (quality 0–100) or `32|||2`.
 
 **Proposal, in two phases.**
 
@@ -187,7 +187,7 @@ These are the proposals that are deliberately **not** implemented in #10/#11/#12
 
 ### K2. Move encode/decode and compositing off the session actor / MainActor
 
-**Problem.** Three synchronous costs share the input path:
+**Status (updated).** Implemented in #14 (host encode actor + detached composite, viewer detached decompression). Remaining: a full decode-worker split if profiling shows the actor copies still matter. **Problem.** Three synchronous costs share the input path:
 - `HostedScreenMessage.fullFrame` (row reversal + zstd, ~32 ms for a 16.6 MB 4K frame) runs inside the host session actor;
 - `MacScreenPixels.composite` (measured 9 ms for this Mac's two-display canvas, 17.8 ms for 4K) runs on the MainActor;
 - the viewer's relay actor decodes a frame (`ModernScreenFrameMessage.decode` + renderer apply) before sending the ACK, so input writes queue behind decode (~10 ms per frame, more under load).
@@ -222,5 +222,5 @@ Báo cáo này tổng hợp **toàn bộ phát hiện** của hai đợt audit (
 - **Đang mở:** PR **#12** (nút chuyển màn hình cấp 1, chế độ Vừa khung ghi nhớ, tuỳ chọn ẩn/hiện con trỏ remote).
 - **Còn mở, đã có đề xuất:** delta-rectangle frames + tôn trọng quality preset; đưa encode/decode khỏi actor/MainActor; host cursor feedback; quyền Trợ năng/power assertion; emoji/non-BMP; Caps Lock Mac→Windows; Actions 22/40/53; phím đặc biệt; horizontal wheel injection; Ctrl↔Cmd; dead-key Option; ẩn con trỏ local; clipboard paste flush; dọn chat window; cảnh báo Int16; làm mới màn hình.
 - **Kiểm chứng:** 343 test / 27 suite pass (baseline 275/18), build macOS 12 + macOS 11, CI xanh cả 3 job ở cả ba PR; probe vòng lặp encoder↔host và các policy đều đạt.
-- **Ba đề xuất lớn đã được viết chi tiết ở mục K:** (1) partial frames + quality preset (2 pha, ưu tiên bounding-box an toàn trước); (2) đưa composite/encode/decode ra khỏi MainActor/actor, giữ nguyên backpressure ACK; (3) host cursor feedback (vẽ cursor vào frame trước, sau đó gửi CursorMessage khi có capture Windows xác nhận).
+- **Ba đề xuất lớn ở mục K:** (1) partial frames + quality preset — **pha 1 đã implement trong PR #14** (một hình chữ nhật thay đổi, encoder actor; đo 4K: full 10,3 ms/15,82 MiB so với sửa 1 pixel còn 2.115 B); (2) đưa composite/encode/decode ra khỏi MainActor/actor — **đã implement trong PR #14**, giữ nguyên backpressure ACK; (3) host cursor feedback — vẫn mở, cần capture Windows.
 - **Cần Windows UltraViewer thật:** phản ứng với double-click/WM_MOUSEHWHEEL, modifier side, VK_PACKET surrogate, quality command, heartbeat khi màn hình tĩnh, không gian toạ độ monitor.
