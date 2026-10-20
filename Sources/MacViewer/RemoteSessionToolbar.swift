@@ -300,7 +300,8 @@ struct RemoteScreenViewport: View {
 
     private var screen: some View {
         RemoteScreenView(feed: feed, smoothScaling: smoothScaling,
-                         scrollSensitivity: scrollSensitivity, inputEnabled: inputEnabled, onInput: onInput)
+                         scrollSensitivity: scrollSensitivity, inputEnabled: inputEnabled,
+                         localPanEnabled: displayScale == .actualSize, onInput: onInput)
     }
 }
 

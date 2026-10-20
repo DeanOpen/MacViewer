@@ -24,12 +24,17 @@ public enum MouseMessage: Equatable, Sendable {
     /// Vertical wheel (WM_MOUSEWHEEL 0x20a). The signed delta remains packed in
     /// wParam's high word; it is not sent as a separate decimal parameter.
     case verticalWheel(wParam: Int32, lParam: Int32)
+    /// Horizontal wheel (WM_MOUSEHWHEEL 0x20e), same signed-high-word packing.
+    /// Host support for this window message is not established by the recovered
+    /// client yet; tracker/tilt input is ignored by older peers.
+    case horizontalWheel(wParam: Int32, lParam: Int32)
 
     public var windowsMessage: Int32 {
         switch self {
         case .move: 0x200
         case let .button(button, _, _): button.rawValue
         case .verticalWheel: 0x20a
+        case .horizontalWheel: 0x20e
         }
     }
 
@@ -37,7 +42,8 @@ public enum MouseMessage: Equatable, Sendable {
         let parameters: [Int32]
         switch self {
         case let .move(wParam, x, y): parameters = [wParam, x, y]
-        case let .button(_, wParam, lParam), let .verticalWheel(wParam, lParam):
+        case let .button(_, wParam, lParam), let .verticalWheel(wParam, lParam),
+             let .horizontalWheel(wParam, lParam):
             parameters = [wParam, lParam]
         }
         return (["8", String(windowsMessage)] + parameters.map(String.init)).joined(separator: "|||")

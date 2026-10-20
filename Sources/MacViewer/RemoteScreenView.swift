@@ -30,6 +30,8 @@ struct RemoteScreenView: NSViewRepresentable {
     let smoothScaling: Bool
     let scrollSensitivity: Double
     let inputEnabled: Bool
+    /// At Actual size the surrounding ScrollView owns plain wheel gestures.
+    let localPanEnabled: Bool
     let onInput: (RemoteInput) -> Void
 
     func makeNSView(context: Context) -> RemoteScreenNSView {
@@ -42,8 +44,14 @@ struct RemoteScreenView: NSViewRepresentable {
         view.smoothScaling = smoothScaling
         view.scrollSensitivity = scrollSensitivity
         view.inputEnabled = inputEnabled
+        view.localPanEnabled = localPanEnabled
         view.onInput = onInput
         view.needsDisplay = true
+        // Deliberately no focus claim here: updateNSView runs on unrelated
+        // SwiftUI updates, and stealing the keyboard from a toolbar button,
+        // popover or menu while the user is navigating would be wrong. Focus is
+        // claimed only on explicit transitions (control enabled, view entering
+        // its window/Actual size, window becoming key).
     }
 }
 
@@ -53,9 +61,18 @@ final class RemoteScreenNSView: NSView {
     var image: CGImage? { feed?.image }
     var smoothScaling = true
     var scrollSensitivity = 1.0
+    var localPanEnabled = false
     var inputEnabled = false {
         didSet {
-            if oldValue && !inputEnabled { discardComposition(); rawKeysDown.removeAll(); onInput?(.releaseAll) }
+            if oldValue && !inputEnabled {
+                discardComposition()
+                rawKeysDown.removeAll()
+                modifierKeysDown.removeAll()
+                suppressedMouseUpButtons.removeAll()
+                onInput?(.releaseAll)
+            } else if !oldValue && inputEnabled {
+                focusIfAppropriate()
+            }
         }
     }
     var onInput: ((RemoteInput) -> Void)?
@@ -70,10 +87,49 @@ final class RemoteScreenNSView: NSView {
     private var keyEventConsumed = false
     /// Keys sent on the physical VK path, so their key-up is sent too.
     private var rawKeysDown: Set<UInt16> = []
+    /// Modifier keys whose side-specific down/up was already sent.
+    private var modifierKeysDown: Set<UInt16> = []
+    /// A double-click message already releases its button on the wire, so the
+    /// matching mouse-up must not send another click.
+    private var suppressedMouseUpButtons: Set<Int> = []
+    private var keyWindowObserver: NSObjectProtocol?
     private var pointerTrackingArea: NSTrackingArea?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { inputEnabled }
+
+    /// The activation click that brings MacViewer forward must reach Windows too.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { inputEnabled }
+
+    /// Claims keyboard focus for the remote screen when nothing editable owns it.
+    /// Call this only from explicit focus transitions (control enabled, view
+    /// entering its window / Actual size, window becoming key), never from a
+    /// routine layout pass: an unrelated first responder (toolbar button,
+    /// popover, menu) must keep the keyboard on unrelated SwiftUI updates.
+    func focusIfAppropriate() {
+        guard let window else { return }
+        guard RemoteScreenFocus.shouldClaim(
+            inputEnabled: inputEnabled, windowIsKey: window.isKeyWindow,
+            alreadyFirstResponder: window.firstResponder === self,
+            firstResponderIsTextEditor: window.firstResponder is NSTextView) else { return }
+        window.makeFirstResponder(self)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if let keyWindowObserver { NotificationCenter.default.removeObserver(keyWindowObserver) }
+        keyWindowObserver = nil
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.focusIfAppropriate() }
+        }
+        focusIfAppropriate()
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -156,7 +212,13 @@ final class RemoteScreenNSView: NSView {
     }
 
     override func resignFirstResponder() -> Bool {
-        if inputEnabled { discardComposition(); rawKeysDown.removeAll(); onInput?(.releaseAll) }
+        if inputEnabled {
+            discardComposition()
+            rawKeysDown.removeAll()
+            modifierKeysDown.removeAll()
+            suppressedMouseUpButtons.removeAll()
+            onInput?(.releaseAll)
+        }
         return super.resignFirstResponder()
     }
 
@@ -172,6 +234,13 @@ final class RemoteScreenNSView: NSView {
     override func otherMouseUp(with event: NSEvent) { sendButton(event, pressed: false) }
 
     override func scrollWheel(with event: NSEvent) {
+        // At Actual size plain wheel gestures pan the local ScrollView; Option
+        // sends them to the Windows desktop instead.
+        guard RemoteWheelRouting.forwardsToHost(localPanEnabled: localPanEnabled,
+                                                optionHeld: event.modifierFlags.contains(.option)) else {
+            super.scrollWheel(with: event)
+            return
+        }
         guard inputEnabled, let point = remotePoint(for: event) else { super.scrollWheel(with: event); return }
         // The peer routes its wheel by the transmitted position and the wire
         // encoder packs the last accepted pointer, so send the exact position
@@ -259,7 +328,16 @@ final class RemoteScreenNSView: NSView {
 
     override func flagsChanged(with event: NSEvent) {
         guard inputEnabled else { return }
-        onInput?(.modifiers(modifiers(event)))
+        let current = modifiers(event)
+        // AppKit reports modifier transitions as aggregate flags; the event's
+        // keyCode tells which physical side changed, so right Shift/Ctrl/Alt
+        // (AltGr) keep their Windows identity.
+        if RemoteScreenModifiers.isModifierKeyCode(event.keyCode) {
+            let pressed = !modifierKeysDown.contains(event.keyCode)
+            if pressed { modifierKeysDown.insert(event.keyCode) } else { modifierKeysDown.remove(event.keyCode) }
+            onInput?(.key(keyCode: event.keyCode, characters: nil, pressed: pressed, modifiers: current))
+        }
+        onInput?(.modifiers(current))
     }
 
     private var imageRect: NSRect {
@@ -287,12 +365,26 @@ final class RemoteScreenNSView: NSView {
 
     private func sendButton(_ event: NSEvent, pressed: Bool) {
         guard inputEnabled else { return }
+        let button = event.buttonNumber
+        if pressed {
+            // Never let a lost double-click mouse-up leave a stale suppression
+            // that would swallow this click's release and hold the button down.
+            suppressedMouseUpButtons.remove(button)
+        } else if suppressedMouseUpButtons.remove(button) != nil {
+            // A double-click already released this button on the wire.
+            return
+        }
         if pressed { window?.makeFirstResponder(self) }
         guard let point = remotePoint(for: event) else {
             if !pressed { onInput?(.releaseAll) }
             return
         }
-        onInput?(.pointerButton(button: event.buttonNumber, pressed: pressed, x: point.x, y: point.y))
+        if pressed, event.clickCount >= 2 {
+            suppressedMouseUpButtons.insert(button)
+            onInput?(.doubleClick(button: button, x: point.x, y: point.y))
+            return
+        }
+        onInput?(.pointerButton(button: button, pressed: pressed, x: point.x, y: point.y))
     }
 
     private func modifiers(_ event: NSEvent) -> RemoteModifiers {
@@ -359,4 +451,39 @@ extension RemoteScreenNSView: @preconcurrency NSTextInputClient {
     }
 
     func characterIndex(for point: NSPoint) -> Int { NSNotFound }
+}
+
+/// Pure routing rule for wheel gestures; unit-tested without a window.
+enum RemoteWheelRouting {
+    /// Actual size wraps the screen in a ScrollView, so plain wheel gestures pan
+    /// locally. Option keeps the old behaviour and sends the wheel to the peer.
+    /// Fit-to-window keeps forwarding everything, as before.
+    static func forwardsToHost(localPanEnabled: Bool, optionHeld: Bool) -> Bool {
+        !localPanEnabled || optionHeld
+    }
+}
+
+/// Pure focus rule: the remote screen may claim keyboard focus only while
+/// control is on, the window is key, and no text editor (chat composer, search
+/// field, …) owns the keyboard.
+enum RemoteScreenFocus {
+    static func shouldClaim(inputEnabled: Bool, windowIsKey: Bool,
+                            alreadyFirstResponder: Bool, firstResponderIsTextEditor: Bool) -> Bool {
+        inputEnabled && windowIsKey && !alreadyFirstResponder && !firstResponderIsTextEditor
+    }
+}
+
+/// Mac hardware key codes of the four side-specific modifiers (HIToolbox kVK_*).
+enum RemoteScreenModifiers {
+    static func isModifierKeyCode(_ code: UInt16) -> Bool {
+        switch code {
+        case 0x36, 0x37, // RightCommand, Command
+             0x38, 0x3c, // Shift, RightShift
+             0x3a, 0x3d, // Option, RightOption
+             0x3b, 0x3e: // Control, RightControl
+            true
+        default:
+            false
+        }
+    }
 }

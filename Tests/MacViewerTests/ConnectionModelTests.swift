@@ -417,6 +417,111 @@ struct ConnectionModelTests {
         #expect(model.frame == nil && model.displayedFrame == nil && model.remoteCursor == nil)
     }
 
+    @Test("Double-click is offset for the selected monitor like other clicks")
+    func doubleClickMonitorOffset() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        let monitors = try RemoteControlCommands.monitors(from: Data("-2:-1:0:1|0:-1:2:1|".utf8))
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true,
+                                                            monitors: monitors, virtualLeft: -2, virtualTop: -1)))
+        adapter.events[0].yield(.frame(try makeFrame(width: 4, height: 2)))
+        try await settle { model.displayedFrame != nil }
+        model.selectMonitor(2); model.setControlEnabled(true)
+        model.send(.doubleClick(button: 0, x: 0, y: 1))
+        try await settle { adapter.inputs.last == .doubleClick(button: 0, x: 2, y: 1) }
+        model.disconnect()
+    }
+
+    @Test("Control returns after a screen refresh that still allows input")
+    func controlRestoredAfterRefresh() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true)))
+        try await settle { model.phase == .connected && model.controlEnabled }
+        // refreshScreen() suspends permission before the new initialization.
+        adapter.events[0].yield(.inputPermissionChanged(false))
+        try await settle { !model.controlEnabled }
+        adapter.events[0].yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: "123456789",
+                                                                        allowsRemoteInput: true)))
+        adapter.events[0].yield(.inputPermissionChanged(true))
+        try await settle { model.controlEnabled }
+        model.send(.pointerMoved(x: 9, y: 9))
+        try await settle { adapter.inputs.last == .pointerMoved(x: 9, y: 9) }
+        model.disconnect()
+    }
+
+    @Test("A real host revocation is never auto-restored after the host allows input again")
+    func controlRevocationStaysOff() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true)))
+        try await settle { model.phase == .connected && model.controlEnabled }
+        adapter.events[0].yield(.inputPermissionChanged(false))
+        try await settle { !model.controlEnabled }
+        // The host re-allows input without a screen refresh: not a refresh, so the
+        // explicit Control toggle stays off.
+        adapter.events[0].yield(.inputPermissionChanged(true))
+        try await settle { model.remoteInfo?.allowsRemoteInput == true }
+        #expect(!model.controlEnabled)
+        model.disconnect()
+    }
+
+    @Test("A refresh while control was already off does not turn it back on")
+    func refreshDoesNotEnableControl() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true)))
+        try await settle { model.phase == .connected && model.controlEnabled }
+        model.setControlEnabled(false)
+        adapter.events[0].yield(.inputPermissionChanged(false))
+        adapter.events[0].yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: "123456789",
+                                                                        allowsRemoteInput: true)))
+        adapter.events[0].yield(.inputPermissionChanged(true))
+        try await settle { model.remoteInfo?.allowsRemoteInput == true }
+        #expect(!model.controlEnabled)
+        model.disconnect()
+    }
+
+    @Test("A peer without binary keyboard support surfaces a keyboard notice")
+    func keyboardCapabilityNotice() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true,
+                                                            keyboardSupported: false)))
+        try await settle { model.phase == .connected }
+        #expect(model.keyboardNotice != nil)
+        adapter.events[0].yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: "123456789",
+                                                                        allowsRemoteInput: true,
+                                                                        keyboardSupported: true)))
+        try await settle { model.keyboardNotice == nil }
+        model.disconnect()
+    }
+
     @Test("A monitor that does not fit the image shows all monitors with a visible notice")
     func monitorGeometryMismatchNotice() async throws {
         let defaults = try isolatedDefaults()

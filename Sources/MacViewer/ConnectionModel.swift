@@ -89,6 +89,9 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var computerAudioEnabled = false
     @Published private(set) var isChangingAudio = false
     @Published private(set) var showRemoteCursor = true
+    /// Explains that this peer version cannot receive keyboard messages; the UI
+    /// must not claim working typing while the encoder drops every key.
+    @Published private(set) var keyboardNotice: String?
     private(set) var remoteCursor: RemoteCursorPresenter.Snapshot? {
         didSet { screenFeed.showCursor(remoteCursor) }
     }
@@ -110,6 +113,10 @@ final class ConnectionModel: ObservableObject {
     private var audioTask: Task<Void, Never>?
     private var audioRevision: UInt64 = 0
     private var desiredAudioEnabled = false
+    /// Control was cut by a screen refresh (not a host revocation) and may be
+    /// restored once the refreshed screen still allows input.
+    private var controlWasEnabledBeforePermissionLoss = false
+    private var restoreControlAfterRefresh = false
 
     init(adapter: any MacViewerSessionAdapter, defaults: UserDefaults = .standard,
          credentials: (any PartnerCredentialStore)? = nil,
@@ -191,6 +198,9 @@ final class ConnectionModel: ObservableObject {
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
         monitorNotice = nil
+        keyboardNotice = nil
+        controlWasEnabledBeforePermissionLoss = false
+        restoreControlAfterRefresh = false
         phase = .connecting
         status = "Connecting to \(identifier)…"
         let activeGeneration = UUID()
@@ -243,6 +253,9 @@ final class ConnectionModel: ObservableObject {
         displayedFrame = nil
         selectedMonitor = 0
         monitorNotice = nil
+        keyboardNotice = nil
+        controlWasEnabledBeforePermissionLoss = false
+        restoreControlAfterRefresh = false
         remoteInfo = nil
         password = ""
     }
@@ -272,6 +285,8 @@ final class ConnectionModel: ObservableObject {
             case let .pointerMoved(x, y): translated = .pointerMoved(x: x + region.x, y: y + region.y)
             case let .pointerButton(button, pressed, x, y):
                 translated = .pointerButton(button: button, pressed: pressed, x: x + region.x, y: y + region.y)
+            case let .doubleClick(button, x, y):
+                translated = .doubleClick(button: button, x: x + region.x, y: y + region.y)
             default: translated = input
             }
         } else { translated = input }
@@ -449,6 +464,13 @@ final class ConnectionModel: ObservableObject {
         if monitorNotice != notice { monitorNotice = notice }
     }
 
+    /// Tells the user when this peer version cannot receive keyboard messages.
+    private func updateKeyboardNotice(for info: RemoteSessionInfo) {
+        let notice: String? = info.keyboardSupported ? nil
+            : LF("Keyboard input is unavailable with this Windows UltraViewer version. Mouse and clipboard still work; update UltraViewer on the Windows computer to type.")
+        if keyboardNotice != notice { keyboardNotice = notice }
+    }
+
     private func updateRemoteCursor() {
         guard showRemoteCursor, phase == .connected, displayedFrame != nil, let info = remoteInfo else {
             remoteCursor = nil
@@ -512,6 +534,9 @@ final class ConnectionModel: ObservableObject {
             status = "Connected to \(info.displayName ?? info.partnerID)."
             selectedMonitor = savedMonitorSelection(for: info)
             monitorNotice = nil
+            controlWasEnabledBeforePermissionLoss = false
+            restoreControlAfterRefresh = false
+            updateKeyboardNotice(for: info)
             rememberPartner(info.partnerID)
             if defaults.bool(forKey: Self.computerAudioKey) { requestAudio(true, clearError: false) }
             if let pending = pendingCredential {
@@ -570,11 +595,19 @@ final class ConnectionModel: ObservableObject {
                !merged.monitors.contains(where: { $0.index == selectedMonitor }) {
                 selectedMonitor = 0
             }
+            // A screen refresh re-initialises the screen while the peer still
+            // allows input; remember that so control can come back afterwards.
+            if !controlEnabled, controlWasEnabledBeforePermissionLoss,
+               merged.allowsRemoteInput {
+                restoreControlAfterRefresh = true
+            }
+            updateKeyboardNotice(for: merged)
             updateDisplayedFrame()
         case let .inputPermissionChanged(allowed):
             guard phase == .connected else { return }
             let wasAllowed = remoteInfo?.allowsRemoteInput == true
             if !allowed {
+                if controlEnabled { controlWasEnabledBeforePermissionLoss = true }
                 enqueueInput(.releaseAll)
                 controlEnabled = false
             }
@@ -582,12 +615,27 @@ final class ConnectionModel: ObservableObject {
                 info.allowsRemoteInput = allowed
                 remoteInfo = info
             }
-            if allowed && !wasAllowed {
-                // A screen refresh may have suspended an in-flight input write.
-                // Restore an ordered release even if resetting the old queue
-                // discarded one behind a successfully completed held key.
-                startInput(releasingHeldInput: true)
-                errorMessage = nil
+            if allowed {
+                if restoreControlAfterRefresh, controlWasEnabledBeforePermissionLoss,
+                   remoteInfo?.allowsRemoteInput == true {
+                    // The refresh finished and the peer still allows input: put
+                    // the Control toggle back where the user left it.
+                    restoreControlAfterRefresh = false
+                    controlWasEnabledBeforePermissionLoss = false
+                    if inputBuffer == nil || inputBuffer?.isFinished == true { startInput() }
+                    controlEnabled = true
+                    errorMessage = nil
+                } else if !wasAllowed {
+                    // A real host revocation/re-grant is never auto-restored; the
+                    // user must switch Control back on explicitly.
+                    controlWasEnabledBeforePermissionLoss = false
+                    restoreControlAfterRefresh = false
+                    // A screen refresh may have suspended an in-flight input write.
+                    // Restore an ordered release even if resetting the old queue
+                    // discarded one behind a successfully completed held key.
+                    startInput(releasingHeldInput: true)
+                    errorMessage = nil
+                }
             }
         case let .disconnected(reason):
             endSession(message: reason ?? "The remote computer disconnected.")
@@ -637,6 +685,9 @@ final class ConnectionModel: ObservableObject {
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
         monitorNotice = nil
+        keyboardNotice = nil
+        controlWasEnabledBeforePermissionLoss = false
+        restoreControlAfterRefresh = false
         remoteInfo = nil
     }
 
@@ -654,6 +705,9 @@ final class ConnectionModel: ObservableObject {
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
         monitorNotice = nil
+        keyboardNotice = nil
+        controlWasEnabledBeforePermissionLoss = false
+        restoreControlAfterRefresh = false
         remoteInfo = nil
     }
 

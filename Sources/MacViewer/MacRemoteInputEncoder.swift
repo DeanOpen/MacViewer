@@ -14,6 +14,7 @@ struct MacRemoteInputEncoder {
     private var pointer: Point?
     private var lastMoveFlags: Int32?
     private var wheelRemainder = 0.0
+    private var horizontalWheelRemainder = 0.0
 
     /// Supply the negotiated capability corresponding to the desktop's
     /// isTargetVersionGreaterThan6213 branch; this encoder does not infer it.
@@ -38,18 +39,38 @@ struct MacRemoteInputEncoder {
             else { buttons.removeAll { $0 == button } }
             output.append(MouseMessage.button(event, wParam: mouseFlags,
                 lParam: pointer?.packed ?? 0).encode())
-        case let .scroll(_, deltaY):
-            guard deltaY.isFinite else { return [] }
+        case let .doubleClick(button, x, y):
+            // The wire double-click already contains its press and release, so it
+            // must move first but never leave this encoder's button state held.
+            guard let event = Self.doubleClickEvent(button),
+                  let point = Point(x: x, y: y) else { return [] }
+            move(to: point, force: true, into: &output)
+            output.append(MouseMessage.button(event, wParam: mouseFlags,
+                lParam: pointer?.packed ?? 0).encode())
+        case let .scroll(deltaX, deltaY):
             // RemoteInput does not identify precise trackpad vs wheel units.
             // One input unit is one 120-unit wheel step; keep fractional units.
-            let total = wheelRemainder + min(256, max(-256, deltaY))
-            let steps = total.rounded(.towardZero)
-            wheelRemainder = total - steps
-            if steps != 0 {
-                output.append(MouseMessage.verticalWheel(
-                    wParam: MouseMessage.wheelWParam(delta: Int16(steps * 120),
-                        keyFlags: UInt16(mouseFlags)),
-                    lParam: pointer?.packed ?? 0).encode())
+            if deltaY.isFinite, deltaY != 0 {
+                let total = wheelRemainder + min(256, max(-256, deltaY))
+                let steps = total.rounded(.towardZero)
+                wheelRemainder = total - steps
+                if steps != 0 {
+                    output.append(MouseMessage.verticalWheel(
+                        wParam: MouseMessage.wheelWParam(delta: Int16(steps * 120),
+                            keyFlags: UInt16(mouseFlags)),
+                        lParam: pointer?.packed ?? 0).encode())
+                }
+            }
+            if deltaX.isFinite, deltaX != 0 {
+                let total = horizontalWheelRemainder + min(256, max(-256, deltaX))
+                let steps = total.rounded(.towardZero)
+                horizontalWheelRemainder = total - steps
+                if steps != 0 {
+                    output.append(MouseMessage.horizontalWheel(
+                        wParam: MouseMessage.wheelWParam(delta: Int16(steps * 120),
+                            keyFlags: UInt16(mouseFlags)),
+                        lParam: pointer?.packed ?? 0).encode())
+                }
             }
         case let .key(code, characters, pressed, flags):
             modifiers = flags
@@ -111,6 +132,7 @@ struct MacRemoteInputEncoder {
             for code in keyOrder.reversed() { releaseKey(code, into: &output) }
             modifiers = modifiers.intersection(.capsLock)
             wheelRemainder = 0
+            horizontalWheelRemainder = 0
         }
         return output
     }
@@ -190,6 +212,15 @@ struct MacRemoteInputEncoder {
         case (1, false): .rightUp
         case (2, true): .middleDown
         case (2, false): .middleUp
+        default: nil
+        }
+    }
+
+    private static func doubleClickEvent(_ button: Int) -> MouseMessage.Button? {
+        switch button {
+        case 0: .leftDoubleClick
+        case 1: .rightDoubleClick
+        case 2: .middleDoubleClick
         default: nil
         }
     }

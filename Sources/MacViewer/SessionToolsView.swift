@@ -46,7 +46,6 @@ struct SessionToolsButton: View {
 struct SessionToolsView: View {
     @ObservedObject var tools: SessionToolsModel
     let peerName: String
-    @State private var focusDraft: Bool?
     @State private var isDropTargeted = false
 
     private static let timeFormatter: DateFormatter = {
@@ -76,7 +75,8 @@ struct SessionToolsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(Group { if isDropTargeted { dropOverlay } })
-        .onAppear { if tools.isActive { focusDraft = true } }
+        // The composer takes focus only when the user clicks it; opening chat to
+        // read must not steal the keyboard from the remote screen.
         // Drop files anywhere on the chat to send them.
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             guard tools.canTransferFiles, !providers.isEmpty else { return false }
@@ -105,7 +105,7 @@ struct SessionToolsView: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .shapeBackground(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.quaternaryLabel))
-                .focusOnRequest($focusDraft, equals: true).disabled(!tools.isActive)
+                .disabled(!tools.isActive)
                 .submitAction { if canSend { tools.sendDraft() } }
                 .onChange(of: tools.draft) { _ in tools.draftChanged() }
             Button { tools.sendDraft() } label: {
