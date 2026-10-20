@@ -208,8 +208,15 @@ sudo apt install ./linuxviewer.deb
 linuxviewer                       # mở cửa sổ kết nối
 ```
 
-`apt` tự tải các thư viện phụ thuộc (ALSA, PipeWire) từ kho phần mềm có sẵn trên
-Ubuntu 22.04+, Debian 12+ và Mint 21+. Nếu báo thiếu gói, chạy `sudo apt install -f`.
+Bản tải này gọn nhẹ: chỉ cần thư viện C và ALSA nên cài được trên mọi bản Linux
+bằng một lệnh. Nó có đủ tính năng trừ **chia sẻ màn hình trên Wayland** (xem, điều
+khiển, chia sẻ màn hình X11, âm thanh, chat và gửi file đều chạy). Muốn chia sẻ màn
+hình từ phiên Wayland thì dùng bản Wayland, bản này cần thêm PipeWire:
+
+```sh
+curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-wayland-amd64.deb
+sudo apt install ./linuxviewer.deb
+```
 
 **Hoặc bản nén chạy ngay** (mọi bản Linux, không cần cài):
 

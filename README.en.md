@@ -212,9 +212,16 @@ sudo apt install ./linuxviewer.deb
 linuxviewer                       # open the connect window
 ```
 
-`apt` pulls the dependencies (ALSA, PipeWire) from the normal repositories; they
-ship with Ubuntu 22.04+, Debian 12+ and Mint 21+. If it ever reports a missing
-dependency, run `sudo apt install -f`.
+This download is lean: it needs only the C runtime and ALSA, so it installs on
+any distro with one command. It includes everything except **Wayland hosting**
+(viewing, control, X11 hosting, audio, chat and files all work). To host your
+own screen from a Wayland session, use the Wayland build, which also needs
+PipeWire:
+
+```sh
+curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest/download/linuxviewer-wayland-amd64.deb
+sudo apt install ./linuxviewer.deb
+```
 
 **Or the portable tarball** (any distro, no install):
 

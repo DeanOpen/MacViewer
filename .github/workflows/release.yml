@@ -260,4 +260,8 @@ jobs:
             dist/linux/linuxviewer_${{ env.VERSION }}_amd64.deb
             dist/linux/linuxviewer-x86_64.tar.gz
             dist/linux/linuxviewer-amd64.deb
+            dist/linux/linuxviewer-wayland-${{ env.VERSION }}-x86_64.tar.gz
+            dist/linux/linuxviewer-wayland_${{ env.VERSION }}_amd64.deb
+            dist/linux/linuxviewer-wayland-x86_64.tar.gz
+            dist/linux/linuxviewer-wayland-amd64.deb
             dist/linux/SHA256SUMS-linux.txt
