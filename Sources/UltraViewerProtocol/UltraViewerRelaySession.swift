@@ -141,6 +141,11 @@ public actor UltraViewerRelaySession {
     private var peerTask: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
+    /// Liveness policy and its periodic ticker; active only while streaming.
+    private var stall: RelayStallWatchdog?
+    private var stallTask: Task<Void, Never>?
+    /// True after the one recovery attempt so it is never repeated.
+    private var stallRecovering = false
     private var events: AsyncThrowingStream<Event, any Swift.Error>.Continuation?
     private var latestFrame = LatestScreenFrame()
     private var renderer: ModernScreenRenderer?
@@ -199,6 +204,8 @@ public actor UltraViewerRelaySession {
         self.pendingRelayInitialization = nil
         self.relayPingStarted = nil; self.peerPingStarted = nil
         self.heartbeatTicks = 0
+        self.stallTask?.cancel(); self.stallTask = nil; self.stall = nil
+        self.stallRecovering = false
         self.capturedCommands = []
         let token = UUID()
         generation = token
@@ -686,6 +693,7 @@ public actor UltraViewerRelaySession {
                                     source: PeerSource, relayAddress: RelayIPv4Address? = nil,
                                     relayPort: UInt16? = nil, token: UUID) async throws {
         guard token == generation, phase != .closed else { return }
+        notePeerActivity()
         let parts: [Data]
         if let suppliedParts { parts = suppliedParts }
         else { parts = try MultipartPayload.decode(payload) }
@@ -766,6 +774,7 @@ public actor UltraViewerRelaySession {
             }
             phase = .active
             deadline?.cancel()
+            armStallWatchdog(token)
             let previouslyAccepted = diagnostics.peerAccepted
             diagnostics.peerAccepted = true
             if heartbeat == nil {
@@ -933,6 +942,70 @@ public actor UltraViewerRelaySession {
         await finish(Failure.timedOut)
     }
 
+    private static func uptimeSeconds() -> TimeInterval {
+        TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+    }
+
+    private func notePeerActivity() {
+        stall?.noteActivity(at: Self.uptimeSeconds())
+    }
+
+    /// Starts one liveness watchdog per active screen. Any later initialization
+    /// (relay fallback, direct upgrade, refresh) replaces it with a fresh one.
+    private func armStallWatchdog(_ token: UUID) {
+        stallTask?.cancel()
+        stallRecovering = false
+        stall = RelayStallWatchdog(start: Self.uptimeSeconds())
+        stallTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(seconds: 1) } catch { return }
+                guard let self else { return }
+                let keepTicking = await self.stallStep(token: token)
+                if !keepTicking { return }
+            }
+        }
+    }
+
+    private func stopStallWatchdog() {
+        stallTask?.cancel()
+        stallTask = nil
+        stall = nil
+        stallRecovering = false
+    }
+
+    /// One watchdog step. Returns false only when the session is closed or the
+    /// watchdog has acted; after a recovery the ticker keeps running so a peer
+    /// that never resumes still reaches `.timedOut`.
+    private func stallStep(token: UUID) async -> Bool {
+        guard token == generation, phase != .closed, var watchdog = stall else { return false }
+        let action = watchdog.tick(at: Self.uptimeSeconds())
+        stall = watchdog
+        switch action {
+        case .none:
+            return true
+        case .recover:
+            // One-shot recovery: perform it only from the active phase and only
+            // once. Otherwise (e.g. a protocol-initiated re-login is already in
+            // progress) just wait for activity or the recovery limit.
+            guard !stallRecovering else { return true }
+            stallRecovering = true
+            guard phase == .active else { return true }
+            try? emit(.status("The Windows screen is not responding. Refreshing…"))
+            do {
+                try await refreshScreen()
+            } catch {
+                if token == generation { await finish(error) }
+                return false
+            }
+            // Keep ticking: if the refreshed initialization never arrives, the
+            // policy fires .timedOut after recoveryLimit of continued silence.
+            return true
+        case .timedOut:
+            await finish(Failure.timedOut)
+            return false
+        }
+    }
+
     private func emit(_ event: Event) throws {
         switch events?.yield(event) {
         case .terminated: throw CancellationError()
@@ -955,6 +1028,7 @@ public actor UltraViewerRelaySession {
         generation = UUID()
         deadline?.cancel(); deadline = nil
         heartbeat?.cancel(); heartbeat = nil
+        stopStallWatchdog()
         commandTask?.cancel(); commandTask = nil
         peerTask?.cancel(); peerTask = nil
         directTask?.cancel(); directTask = nil
