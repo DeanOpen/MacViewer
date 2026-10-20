@@ -11,6 +11,18 @@ private func display(_ id: UInt32, key: String, x: Int, y: Int, width: Int, heig
         pixelWidth: width * scale, pixelHeight: height * scale, isMain: main)
 }
 
+@Test func reverseRetinaPixelSizeUsesBackingScale() {
+    #expect(MacSharingDisplay.pixelSize(bounds: CGRect(x: 0, y: 0, width: 1728, height: 1117), backingScale: 2)
+        == (width: 3456, height: 2234))
+    #expect(MacSharingDisplay.pixelSize(bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080), backingScale: 1)
+        == (width: 1920, height: 1080))
+    // A missing or nonsensical backing scale never upscales.
+    #expect(MacSharingDisplay.pixelSize(bounds: CGRect(x: 0, y: 0, width: 1440, height: 900), backingScale: 0)
+        == (width: 1440, height: 900))
+    #expect(MacSharingDisplay.pixelSize(bounds: CGRect(x: 0, y: 0, width: 1440, height: 900), backingScale: .nan)
+        == (width: 1440, height: 900))
+}
+
 @Test func reverseDisplaysKeepMixedRetinaArrangementAndInputCoordinates() throws {
     let main = display(1, key: "main", x: 0, y: 0, width: 1920, height: 1080, scale: 2, main: true)
     let left = display(2, key: "left", x: -1920, y: -200, width: 1920, height: 1080)
@@ -40,6 +52,7 @@ private func display(_ id: UInt32, key: String, x: Int, y: Int, width: Int, heig
                     display(2, key: "external", x: -1920, y: -200, width: 1920, height: 1080, scale: 2)]
     let layout = try MacDisplayLayout(displays: displays, selection: "external")
     #expect(layout.width == 1920 && layout.height == 1080)
+    #expect(layout.width * layout.height <= MacDisplayLayout.singleDisplayPixelBudget)
     #expect(layout.surfaces.count == 1 && layout.surfaces[0].display.id == 2)
     #expect(layout.monitors == [.init(left: 0, top: 0, right: 1920, bottom: 1080)])
     #expect(layout.geometry.mapPoint(x: 960, y: 540) == CGPoint(x: -960, y: 340))
@@ -83,8 +96,12 @@ private func display(_ id: UInt32, key: String, x: Int, y: Int, width: Int, heig
     let portrait = display(1, key: "portrait", x: 0, y: -2160, width: 2160, height: 3840, main: true)
     let other = display(2, key: "other", x: 2160, y: 0, width: 3840, height: 2160)
     let layout = try MacDisplayLayout(displays: [portrait, other], selection: "all")
-    #expect(layout.width <= 3840 && layout.height <= 2160)
-    #expect(layout.width * layout.height * 2 < HostedScreenMessage.maximumPayloadBytes)
+    // The 16:9 box is gone: an unusual arrangement spends the same pixel budget
+    // on a taller canvas instead of being cropped to 3840x2160.
+    #expect(layout.width == 3394 && layout.height == 2443)
+    #expect(layout.width * layout.height <= MacDisplayLayout.multipleDisplayPixelBudget)
+    #expect(layout.width * layout.height * 2 <= HostedScreenMessage.maximumPayloadBytes)
+    #expect(layout.width <= HostedScreenMessage.maximumDimension && layout.height <= HostedScreenMessage.maximumDimension)
     for monitor in layout.monitors {
         #expect(monitor.left >= 0 && monitor.top >= 0)
         #expect(monitor.right <= Int32(layout.width) && monitor.bottom <= Int32(layout.height))
@@ -94,6 +111,44 @@ private func display(_ id: UInt32, key: String, x: Int, y: Int, width: Int, heig
         display(2, key: "bottom", x: 0, y: 0, width: 1920, height: 1080, scale: 2)
     ], selection: "all")
     #expect(stack.width == 1920 && stack.height == 2160)
+}
+
+@Test func reverseCanvasBudgetIsShapeAgnostic() throws {
+    // Three 1080p displays side by side keep their native width inside the same
+    // 8,294,400-pixel budget instead of being squeezed to 1280x720 each.
+    let trio = (0..<3).map { index in
+        display(UInt32(index + 1), key: "m\(index)", x: index * 1920, y: 0,
+                width: 1920, height: 1080, main: index == 0)
+    }
+    let wide = try MacDisplayLayout(displays: trio, selection: "all")
+    #expect(wide.width == 5760 && wide.height == 1080)
+    #expect(wide.monitors == [
+        .init(left: 0, top: 0, right: 1920, bottom: 1080),
+        .init(left: 1920, top: 0, right: 3840, bottom: 1080),
+        .init(left: 3840, top: 0, right: 5760, bottom: 1080)
+    ])
+    #expect(wide.width * wide.height <= MacDisplayLayout.multipleDisplayPixelBudget)
+    #expect(wide.width * wide.height * 2 <= HostedScreenMessage.maximumPayloadBytes)
+    #expect(wide.width <= HostedScreenMessage.maximumDimension && wide.height <= HostedScreenMessage.maximumDimension)
+
+    // Two stacked 1080p panels keep their native 1920x2160 canvas.
+    let stacked = try MacDisplayLayout(displays: [
+        display(1, key: "top", x: 0, y: -1080, width: 1920, height: 1080, scale: 2, main: true),
+        display(2, key: "bottom", x: 0, y: 0, width: 1920, height: 1080, scale: 2)
+    ], selection: "all")
+    #expect(stacked.width == 1920 && stacked.height == 2160)
+    #expect(stacked.monitors == [
+        .init(left: 0, top: 0, right: 1920, bottom: 1080),
+        .init(left: 0, top: 1080, right: 1920, bottom: 2160)
+    ])
+
+    // A single 4K display running a 1920x1080-point mode is never upscaled to
+    // its device pixels: the canvas stays at the logical desktop size.
+    let fourKLogical = display(1, key: "4k", x: 0, y: 0, width: 1920, height: 1080, scale: 2, main: true)
+    let single = try MacDisplayLayout(displays: [fourKLogical], selection: "4k")
+    #expect(single.width == 1920 && single.height == 1080)
+    #expect(single.width * single.height <= MacDisplayLayout.singleDisplayPixelBudget)
+    #expect(single.monitors == [.init(left: 0, top: 0, right: 1920, bottom: 1080)])
 }
 
 private func image(_ rgba: [UInt8]) throws -> CGImage {

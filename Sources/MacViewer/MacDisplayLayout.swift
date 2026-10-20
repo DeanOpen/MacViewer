@@ -11,23 +11,48 @@ struct MacSharingDisplay: Equatable, Sendable, Identifiable {
     let pixelHeight: Int
     let isMain: Bool
 
+    /// True backing-pixel size for a display's point bounds. `CGDisplayPixelsWide`
+    /// reports the current mode's width in points for Retina modes, so the
+    /// backing scale from `NSScreen` is the reliable source. A missing scale is
+    /// treated as 1 so a display can never be captured above its logical size.
+    static func pixelSize(bounds: CGRect, backingScale: CGFloat) -> (width: Int, height: Int) {
+        let scale = backingScale.isFinite && backingScale > 0 ? backingScale : 1
+        return (max(1, Int((bounds.width * scale).rounded())),
+                max(1, Int((bounds.height * scale).rounded())))
+    }
+
     @MainActor static func current() -> [Self] {
         var ids = [CGDirectDisplayID](repeating: 0, count: 64)
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(UInt32(ids.count), &ids, &count) == .success else { return [] }
-        let names = Dictionary(NSScreen.screens.compactMap { screen -> (CGDirectDisplayID, String)? in
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-            return (number.uint32Value, screen.localizedName)
-        }, uniquingKeysWith: { first, _ in first })
+        // AppKit owns the localized name and the true backing scale; both are keyed
+        // by NSScreenNumber, which is the same display ID CoreGraphics returns.
+        var names: [CGDirectDisplayID: String] = [:]
+        var backingScales: [CGDirectDisplayID: CGFloat] = [:]
+        for screen in NSScreen.screens {
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
+            names[number.uint32Value] = screen.localizedName
+            backingScales[number.uint32Value] = screen.backingScaleFactor
+        }
         return ids.prefix(Int(count)).compactMap { id in
             // Mirrored outputs have the same desktop. Advertise their source once.
             guard CGDisplayMirrorsDisplay(id) == kCGNullDirectDisplay,
                   let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() else { return nil }
             let bounds = CGDisplayBounds(id)
             guard valid(bounds) else { return nil }
+            // Prefer AppKit's backing scale; fall back to the current display mode,
+            // then to CoreGraphics' point-sized mode value for an unknown display.
+            let pixel: (width: Int, height: Int)
+            if let backingScale = backingScales[id] {
+                pixel = Self.pixelSize(bounds: bounds, backingScale: backingScale)
+            } else if let mode = CGDisplayCopyDisplayMode(id), mode.pixelWidth > 0, mode.pixelHeight > 0 {
+                pixel = (mode.pixelWidth, mode.pixelHeight)
+            } else {
+                pixel = (CGDisplayPixelsWide(id), CGDisplayPixelsHigh(id))
+            }
             return Self(id: id, key: CFUUIDCreateString(nil, uuid) as String,
                         name: names[id] ?? L("Display"), bounds: bounds,
-                        pixelWidth: CGDisplayPixelsWide(id), pixelHeight: CGDisplayPixelsHigh(id),
+                        pixelWidth: pixel.width, pixelHeight: pixel.height,
                         isMain: id == CGMainDisplayID())
         }.sorted {
             if $0.isMain != $1.isMain { return $0.isMain }
@@ -46,8 +71,20 @@ struct MacSharingDisplay: Equatable, Sendable, Identifiable {
 /// One uniform scale preserves the desktop arrangement across mixed Retina and
 /// standard displays. Monitor edges are rounded once and reused for capture,
 /// composition and UltraViewer's local monitor crop menu.
+///
+/// UltraViewer transmits the arranged desktop as one RGB555 frame, so the canvas
+/// is limited by a total pixel budget instead of a fixed 16:9 shape: the relay
+/// bandwidth ceilings stay the same (1920x1080 for one display, 3840x2160 for
+/// the arranged desktop) but any arrangement may use its whole budget. Capture
+/// never upscales a display above its logical point resolution; capturing Retina
+/// displays at 2x device pixels is a possible future bandwidth opt-in, not the
+/// default, because it would quadruple the transmitted pixel count.
 struct MacDisplayLayout: Equatable, Sendable {
     static let allDisplaysKey = "all"
+    /// Shape-agnostic replacements for the old 1920x1080 and 3840x2160 boxes.
+    static let singleDisplayPixelBudget = 2_073_600
+    static let multipleDisplayPixelBudget = 8_294_400
+
     struct Surface: Equatable, Sendable {
         let display: MacSharingDisplay
         let pixelRect: CGRect
@@ -64,15 +101,18 @@ struct MacDisplayLayout: Equatable, Sendable {
             throw MacScreenCaptureError.displayUnavailable
         }
         let bounds = selected.dropFirst().reduce(selected[0].bounds) { $0.union($1.bounds) }
-        let backingScale: Double = selected.map { display -> Double in
-            max(Double(display.pixelWidth) / Double(display.bounds.width), Double(display.pixelHeight) / Double(display.bounds.height))
-        }.max() ?? 1
-        let maxWidth = selected.count > 1 ? 3840.0 : 1920.0
-        let maxHeight = selected.count > 1 ? 2160.0 : 1080.0
-        let scale = min(backingScale, min(maxWidth / bounds.width, maxHeight / bounds.height))
+        let area = Double(bounds.width) * Double(bounds.height)
+        let budget = Double(selected.count > 1 ? Self.multipleDisplayPixelBudget : Self.singleDisplayPixelBudget)
+        let dimensionLimit = Double(HostedScreenMessage.maximumDimension)
+        // Explicit Double steps keep older compilers from timing out on the inference.
+        let scale = min(1, (budget / area).squareRoot(),
+                        dimensionLimit / Double(bounds.width), dimensionLimit / Double(bounds.height))
         let width = max(1, Int((bounds.width * scale).rounded(.down)))
         let height = max(1, Int((bounds.height * scale).rounded(.down)))
-        // Explicit Double steps keep older compilers from timing out on the inference.
+        guard width <= HostedScreenMessage.maximumDimension, height <= HostedScreenMessage.maximumDimension,
+              width * height * 2 <= HostedScreenMessage.maximumPayloadBytes else {
+            throw MacScreenCaptureError.invalidFrame
+        }
         func pixel(_ point: CGFloat, from origin: CGFloat, over length: CGFloat, pixels: Int) -> Int {
             let fraction: Double = Double(point - origin) / Double(length)
             return Int((fraction * Double(pixels)).rounded())

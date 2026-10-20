@@ -100,3 +100,42 @@ import UltraViewerProtocol
         provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
     #expect(try MacScreenPixels.rgb555BottomUp(image: image) == expected)
 }
+
+@Test func macHostingPixelsAcceptShapeAgnosticCanvasAndRejectOverBudgetSizes() throws {
+    // Three 1080p displays side by side produce a 5760x1080 canvas; the old
+    // 3840x2160 dimension guards must not reject it.
+    let width = 5760
+    let height = 1080
+    let rgba = Data(count: width * height * 4)
+    let pixels = try MacScreenPixels.rgb555BottomUp(rgbaTopDown: rgba, width: width, height: height,
+                                                    bytesPerRow: width * 4)
+    #expect(pixels.count == width * height * 2)
+    #expect(width * height * 2 <= HostedScreenMessage.maximumPayloadBytes)
+    #expect(MacScreenPixels.maximumDimension == HostedScreenMessage.maximumDimension)
+    #expect(MacScreenPixels.maximumOutputBytes == HostedScreenMessage.maximumPayloadBytes)
+    // Over-budget pixel counts and oversized dimensions are rejected before allocation.
+    #expect(throws: MacScreenCaptureError.invalidFrame) {
+        try MacScreenPixels.rgb555BottomUp(rgbaTopDown: Data(), width: 8192, height: 2000,
+                                           bytesPerRow: 8192 * 4)
+    }
+    #expect(throws: MacScreenCaptureError.invalidFrame) {
+        try MacScreenPixels.rgb555BottomUp(rgbaTopDown: Data(), width: 8193, height: 1,
+                                           bytesPerRow: 8193 * 4)
+    }
+}
+
+@Test func macHostingCaptureRecoveryRetriesOnlyTransientFailures() {
+    #expect(HostCaptureRecoveryPolicy.maximumAttempts == 3)
+    #expect(HostCaptureRecoveryPolicy.isRetryable(MacScreenCaptureError.displayConfigurationChanged))
+    #expect(HostCaptureRecoveryPolicy.isRetryable(MacScreenCaptureError.invalidFrame))
+    #expect(HostCaptureRecoveryPolicy.isRetryable(MacScreenCaptureError.cannotRender))
+    #expect(!HostCaptureRecoveryPolicy.isRetryable(MacScreenCaptureError.screenRecordingRequired))
+    #expect(!HostCaptureRecoveryPolicy.isRetryable(MacScreenCaptureError.displayUnavailable))
+    #expect(!HostCaptureRecoveryPolicy.isRetryable(CancellationError()))
+    struct TransientCaptureFailure: Error {}
+    #expect(HostCaptureRecoveryPolicy.isRetryable(TransientCaptureFailure()))
+    // Backoff grows with each attempt so a display wake has time to settle.
+    #expect(HostCaptureRecoveryPolicy.retryDelay(attempt: 0) > 0)
+    #expect(HostCaptureRecoveryPolicy.retryDelay(attempt: 1) > HostCaptureRecoveryPolicy.retryDelay(attempt: 0))
+    #expect(HostCaptureRecoveryPolicy.retryDelay(attempt: -1) == HostCaptureRecoveryPolicy.retryDelay(attempt: 0))
+}
