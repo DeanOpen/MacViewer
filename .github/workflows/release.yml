@@ -184,6 +184,28 @@ jobs:
             release/SHA256SUMS.txt
           body_path: ${{ runner.temp }}/release-notes.md
 
+      - name: Update Homebrew tap
+        if: env.PRERELEASE != 'true'
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          # Point deanopen/tap's cask at the DMG just published.
+          if [ -z "$HOMEBREW_TAP_DEPLOY_KEY" ]; then echo "::warning::HOMEBREW_TAP_DEPLOY_KEY not set; tap not updated"; exit 0; fi
+          sha="$(shasum -a 256 "release/MacViewer-$VERSION.dmg" | cut -d' ' -f1)"
+          key="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone --depth 1 git@github.com:DeanOpen/homebrew-tap.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+                    -e "s/^  sha256 \".*\"/  sha256 \"$sha\"/" Casks/macviewer.rb
+          if git diff --quiet; then echo "Tap already at $VERSION"; exit 0; fi
+          git -c user.name=Dean -c user.email=279508589+DeanOpen@users.noreply.github.com \
+            commit -am "macviewer $VERSION"
+          git push origin HEAD
+          rm -f "$key"
+
       - name: Clean up keychain
         if: always() && steps.cert.outputs.identity != '-'
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
