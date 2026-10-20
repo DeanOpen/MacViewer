@@ -57,3 +57,43 @@ jobs:
           name: MacViewer-${{ github.sha }}
           path: dist/MacViewer.zip
           retention-days: 14
+
+  # Experimental: the code still needs macOS 12, so this job reports what breaks
+  # without failing CI. Xcode 27 can't target below 12, so it uses Xcode 16.
+  build-macos11:
+    name: Build for macOS 11 (experimental)
+    runs-on: macos-15
+    timeout-minutes: 45
+    continue-on-error: true
+    env:
+      MACVIEWER_MIN_MACOS: "11"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.4"
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Package app
+        env:
+          MACVIEWER_SIGNING_IDENTITY: "-"
+          MACVIEWER_UNIVERSAL: "1"
+          MACVIEWER_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          scripts/package_app.sh release
+          vtool -show-build dist/MacViewer.app/Contents/MacOS/MacViewer | grep -E "minos|platform"
+
+      - name: Zip app
+        run: ditto -c -k --sequesterRsrc --keepParent dist/MacViewer.app dist/MacViewer-macOS11.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacViewer-macOS11-${{ github.sha }}
+          path: dist/MacViewer-macOS11.zip
+          retention-days: 14

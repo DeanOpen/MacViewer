@@ -29,6 +29,7 @@ fi
 # CI sets these; local builds keep the current development values.
 app_version="${MACVIEWER_VERSION:-0.3.7}"
 build_number="${MACVIEWER_BUILD_NUMBER:-5}"
+minimum_system_version="${MACVIEWER_MIN_MACOS:-12}.0"
 build_flags=(--configuration "$configuration")
 if [[ "${MACVIEWER_UNIVERSAL:-0}" == "1" ]]; then
   build_flags+=(--arch arm64 --arch x86_64)
@@ -76,7 +77,7 @@ cat > "$app_directory/Contents/Info.plist" <<PLIST
   <key>CFBundleLocalizations</key><array><string>en</string><string>vi</string></array>
   <key>CFBundleShortVersionString</key><string>$app_version</string>
   <key>CFBundleVersion</key><string>$build_number</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>$minimum_system_version</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 DeanOpen · MIT License</string>

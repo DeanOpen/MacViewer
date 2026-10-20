@@ -1,10 +1,15 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+// CI sets MACVIEWER_MIN_MACOS=11 for the experimental Big Sur build.
+let minimumMacOS: SupportedPlatform = ProcessInfo.processInfo.environment["MACVIEWER_MIN_MACOS"] == "11"
+    ? .macOS(.v11) : .macOS(.v12)
 
 let package = Package(
     name: "MacViewer",
     defaultLocalization: "en",
-    platforms: [.macOS(.v12)],
+    platforms: [minimumMacOS],
     products: [
         .library(name: "UltraViewerProtocol", targets: ["UltraViewerProtocol"]),
         .executable(name: "MacViewer", targets: ["MacViewer"]),
