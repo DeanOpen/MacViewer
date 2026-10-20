@@ -160,7 +160,8 @@ struct RemoteSessionToolbar: View {
             if let selectMonitor = callbacks.selectMonitor, !callbacks.monitors.isEmpty {
                 menu.picker("Monitor",
                             options: [(L("All monitors"), 0)] + callbacks.monitors.map {
-                                (LF("Monitor %ld · %ld × %ld", $0.index, $0.width, $0.height), $0.index)
+                                (LF("Monitor %ld · %ld × %ld", $0.index, $0.width, $0.height)
+                                    + $0.menuPositionSuffix, $0.index)
                             },
                             selection: callbacks.selectedMonitor, select: selectMonitor)
                 menu.separator()
@@ -301,4 +302,10 @@ struct RemoteScreenViewport: View {
         RemoteScreenView(feed: feed, smoothScaling: smoothScaling,
                          scrollSensitivity: scrollSensitivity, inputEnabled: inputEnabled, onInput: onInput)
     }
+}
+
+extension RemoteMonitor {
+    /// Menu-row detail showing the monitor's virtual-desktop offset. Numbers and
+    /// punctuation only, so the localized label format needs no extra words.
+    var menuPositionSuffix: String { " · (\(left), \(top))" }
 }

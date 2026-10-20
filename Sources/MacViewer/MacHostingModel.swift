@@ -511,7 +511,8 @@ final class MacHostingModel: ObservableObject {
     }
 
     private func captureSelectedDisplays() async throws -> HostedScreenFrame {
-        for _ in 0..<3 {
+        var lastError: (any Error)?
+        for attempt in 0..<HostCaptureRecoveryPolicy.maximumAttempts {
             try Task.checkCancellation()
             refreshDisplays()
             let revision = displayRevision
@@ -522,13 +523,49 @@ final class MacHostingModel: ObservableObject {
                 capturedDisplayRevision = revision
                 return frame
             } catch MacScreenCaptureError.displayConfigurationChanged {
+                // The arrangement changed while capturing: retry against the list
+                // that is current after `refreshDisplays()` on the next pass.
+                lastError = MacScreenCaptureError.displayConfigurationChanged
                 continue
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 refreshDisplays()
+                // Permission loss and the chosen display disappearing stop sharing
+                // immediately (documented behaviour). ScreenCaptureKit/CoreGraphics
+                // failures are treated as transient and retried with a short backoff
+                // so a display wake or a one-frame capture hiccup does not drop the
+                // Windows viewer.
+                guard HostCaptureRecoveryPolicy.isRetryable(error) else { throw error }
+                lastError = error
                 if displayRevision != revision { continue }
-                throw error
+                try await Task.sleep(seconds: HostCaptureRecoveryPolicy.retryDelay(attempt: attempt))
             }
         }
+        if let lastError { throw lastError }
         throw MacScreenCaptureError.displayConfigurationChanged
+    }
+}
+
+/// Pure policy for host display-capture failures: which errors are worth
+/// retrying, how many attempts a frame gets, and the short backoff between them.
+struct HostCaptureRecoveryPolicy {
+    static let maximumAttempts = 3
+    static let baseRetryDelay: TimeInterval = 0.15
+
+    /// `screenRecordingRequired` and `displayUnavailable` are terminal by product
+    /// decision. Cancellation is never a capture failure. Everything else (a
+    /// ScreenCaptureKit/CoreGraphics error or a rejected frame) gets retried.
+    static func isRetryable(_ error: any Error) -> Bool {
+        if error is CancellationError { return false }
+        guard let captureError = error as? MacScreenCaptureError else { return true }
+        switch captureError {
+        case .screenRecordingRequired, .displayUnavailable: return false
+        case .displayConfigurationChanged, .invalidFrame, .cannotRender: return true
+        }
+    }
+
+    static func retryDelay(attempt: Int) -> TimeInterval {
+        baseRetryDelay * Double(max(0, attempt) + 1)
     }
 }

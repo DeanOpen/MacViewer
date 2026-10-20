@@ -172,7 +172,12 @@ final class RemoteScreenNSView: NSView {
     override func otherMouseUp(with event: NSEvent) { sendButton(event, pressed: false) }
 
     override func scrollWheel(with event: NSEvent) {
-        guard inputEnabled, remotePoint(for: event) != nil else { super.scrollWheel(with: event); return }
+        guard inputEnabled, let point = remotePoint(for: event) else { super.scrollWheel(with: event); return }
+        // The peer routes its wheel by the transmitted position and the wire
+        // encoder packs the last accepted pointer, so send the exact position
+        // first; otherwise fresh sessions and monitor switches scroll at
+        // (0,0) or at the previous monitor.
+        onInput?(.pointerMoved(x: point.x, y: point.y))
         onInput?(.scroll(
             deltaX: RemoteScroll.detents(delta: event.scrollingDeltaX,
                 precise: event.hasPreciseScrollingDeltas, sensitivity: scrollSensitivity),

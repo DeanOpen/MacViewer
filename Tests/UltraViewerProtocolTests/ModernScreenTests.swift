@@ -81,9 +81,13 @@ private let screenJPEGFixture = Data(base64Encoded:
     let full = try ModernScreenInitialization.decode(parts: initParts)
     #expect(full.virtualLeft == -1920 && full.virtualTop == 100 && full.tileSize == 32)
     #expect(full.targetVersionBytes == Data("6.6.125".utf8))
-    #expect(throws: ModernScreenMessageError.missingPart(9)) {
-        try ModernScreenInitialization.decode(parts: Array(initParts.prefix(9)))
-    }
+    // Parts 9/10 are optional and independent: monitors without a declared
+    // origin still decode (the relay derives the origin from the monitor rects).
+    let monitorsWithoutOrigin = try ModernScreenInitialization.decode(parts: Array(initParts.prefix(9)))
+    #expect(monitorsWithoutOrigin.monitorInformationBytes == Data("monitor".utf8))
+    #expect(monitorsWithoutOrigin.virtualLeft == nil && monitorsWithoutOrigin.virtualTop == nil)
+    let leftWithoutTop = try ModernScreenInitialization.decode(parts: Array(initParts.prefix(10)))
+    #expect(leftWithoutTop.virtualLeft == -1920 && leftWithoutTop.virtualTop == nil)
     #expect(throws: ModernScreenMessageError.missingPart(7)) {
         try ModernScreenInitialization.decode(parts: Array(initParts.prefix(7)))
     }
@@ -256,8 +260,26 @@ private let screenJPEGFixture = Data(base64Encoded:
         rectangles: [0, 0, 1, 1], pixels: screenWords([0x001f]))))
     #expect(renderer.bitmap.bgrPixels == hexData("ff0000000000"))
     #expect(throws: ModernScreenMessageError.sizeLimitExceeded) {
-        try ModernScreenInitialization.decode(parts: [Data([0]), screenLong(8193), screenLong(1)])
+        try ModernScreenInitialization.decode(parts: [Data([0]), screenLong(16_385), screenLong(1)])
     }
+}
+
+@Test func modernScreenInitializationAcceptsMultiMonitorCanvases() throws {
+    // Three 4K displays side by side and two 5K displays are common Windows
+    // multi-monitor desktops; command 0 must not reject them at connect.
+    for (width, height) in [(11_520, 2_160), (10_240, 2_880), (16_384, 1), (8_000, 4_000)] {
+        let decoded = try ModernScreenInitialization.decode(
+            parts: [Data([0]), screenLong(Int32(width)), screenLong(Int32(height))])
+        #expect(decoded.width == width && decoded.height == height)
+    }
+    // Above the dimension cap and above the 32-megapixel cap respectively.
+    for (width, height) in [(16_385, 1), (8_000, 4_001)] {
+        #expect(throws: ModernScreenMessageError.sizeLimitExceeded) {
+            try ModernScreenInitialization.decode(
+                parts: [Data([0]), screenLong(Int32(width)), screenLong(Int32(height))])
+        }
+    }
+    #expect(ModernScreenMessageError.sizeLimitExceeded.errorDescription?.contains("monitor") == true)
 }
 
 @Test func modernScreenAuxiliaryBoundsAndTileSizeUpdates() throws {

@@ -22,4 +22,19 @@ struct RemoteScrollTests {
         }
         #expect(payloads == ["8|||522|||7864320|||0"])
     }
+
+    @Test("A wheel after a pointer move carries that exact position")
+    func wheelCarriesCurrentPointerPosition() {
+        var encoder = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        let moved = encoder.encode(.pointerMoved(x: 123, y: 456)).map {
+            String(decoding: $0, as: UTF8.self)
+        }
+        #expect(moved == ["8|||512|||0|||123|||456"])
+        // WM_MOUSEWHEEL lParam packs the pointer: 123 in the low word, 456 in
+        // the high word (123 | 456 << 16 == 29884539).
+        let wheel = encoder.encode(.scroll(deltaX: 0, deltaY: 1)).map {
+            String(decoding: $0, as: UTF8.self)
+        }
+        #expect(wheel == ["8|||522|||7864320|||29884539"])
+    }
 }

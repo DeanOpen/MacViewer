@@ -2,6 +2,11 @@ import Foundation
 
 /// A separate native host registration and relay. Capture and system input are
 /// owned by the app, after password verification and explicit local approval.
+///
+/// Frame pacing is acknowledgment-driven: at most one frame is in flight, so a
+/// slow relay link or a slow Windows viewer naturally throttles capture and the
+/// session stays link-limited instead of queueing stale frames. `HostCapturePacing`
+/// only shapes the small delay before the next capture, not a fixed frame rate.
 public actor UltraViewerHostSession {
     public struct Configuration: Sendable {
         public var registration: ClientRegistration.Request
@@ -122,6 +127,7 @@ public actor UltraViewerHostSession {
     private var pendingFrame: HostedScreenFrame?
     private var lastFrame: HostedScreenFrame?
     private var nextSequence = HostedScreenMessage.firstFrameNumber
+    private let pacing = HostCapturePacing.standard
     private var waitingForAck = false
     private var captureTicket: UUID?
     public private(set) var diagnostics = Diagnostics()
@@ -144,7 +150,8 @@ public actor UltraViewerHostSession {
 
     public func approve(_ id: UUID, firstFrame: HostedScreenFrame, allowsControl: Bool) async throws {
         guard peerPhase == .approval, peer?.request.id == id, let peer else { throw Failure.notConnected }
-        try await initialize(peer, frame: firstFrame, control: allowsControl)
+        try await initialize(peer, frame: firstFrame, control: allowsControl,
+                             resetSequence: HostFrameNumberPolicy.resetsSequence(for: .freshApproval))
     }
 
     public func decline(_ id: UUID) async {
@@ -170,7 +177,7 @@ public actor UltraViewerHostSession {
         captureTicket = nil
         if let previous = lastFrame, previous.hasSameLayout(as: frame),
            previous.rgb555BottomUp == frame.rgb555BottomUp {
-            scheduleCapture()
+            scheduleCapture(after: pacing.delay(afterFrameChanged: false))
             return
         }
         try await sendFrame(frame)
@@ -436,7 +443,10 @@ public actor UltraViewerHostSession {
                 if old.route == route, old.login.connectionHashKey == login.connectionHashKey,
                    peerPhase == .streaming, let frame = lastFrame {
                     var renewed = old; renewed.login = login
-                    try await initialize(renewed, frame: frame, control: controlAllowed)
+                    // The viewer re-logged in and starts a fresh renderer, so it
+                    // expects frame numbers from the beginning again.
+                    try await initialize(renewed, frame: frame, control: controlAllowed,
+                                         resetSequence: HostFrameNumberPolicy.resetsSequence(for: .viewerRelogin))
                 } else if old.route != route {
                     try await send(try MultipartPayload.encode([Data([27])]), route: route)
                 }
@@ -497,7 +507,9 @@ public actor UltraViewerHostSession {
         } else if tag == "18", peerPhase == .streaming, waitingForAck {
             waitingForAck = false; diagnostics.frameAcknowledgments += 1
             cancelViewerDeadline()
-            scheduleCapture()
+            // The acknowledgment is the backpressure: the next capture starts as
+            // soon as the viewer has decoded the previous frame.
+            scheduleCapture(after: pacing.delay(afterFrameChanged: true))
         } else if tag == "32", payload == Data("32|||1".utf8) {
             await endViewer(reason: Failure.unsupportedDisplay.localizedDescription)
         } else if peerPhase == .streaming, controlAllowed,
@@ -508,7 +520,12 @@ public actor UltraViewerHostSession {
         }
     }
 
-    private func initialize(_ approved: Peer, frame: HostedScreenFrame, control: Bool) async throws {
+    /// Sends a fresh screen initialization. A new viewer session restarts the
+    /// frame numbering; a display change during an existing stream keeps it,
+    /// because the viewer's renderer still expects the previously sent number
+    /// plus one (our own decoder enforces exactly that rule).
+    private func initialize(_ approved: Peer, frame: HostedScreenFrame, control: Bool,
+                            resetSequence: Bool) async throws {
         let token = generation
         let revision = UUID(); initializationID = revision
         let initialization = try HostedScreenMessage.initialization(width: frame.width, height: frame.height,
@@ -516,7 +533,8 @@ public actor UltraViewerHostSession {
         peer = approved; peerPhase = .starting; controlAllowed = control
         sideSwitch.reset()
         controlRevision = UUID()
-        pendingFrame = frame; lastFrame = nil; nextSequence = HostedScreenMessage.firstFrameNumber
+        pendingFrame = frame; lastFrame = nil
+        if resetSequence { nextSequence = HostedScreenMessage.firstFrameNumber }
         waitingForAck = false; captureTicket = nil; captureTimer?.cancel(); captureTimer = nil
         try emit(.releaseInput)
         armViewerDeadline(token: token, request: approved.request.id, seconds: 20)
@@ -540,7 +558,8 @@ public actor UltraViewerHostSession {
     private func sendFrame(_ frame: HostedScreenFrame) async throws {
         guard peerPhase == .streaming, !waitingForAck, let peer else { return }
         if let old = lastFrame, !old.hasSameLayout(as: frame) {
-            try await initialize(peer, frame: frame, control: controlAllowed)
+            try await initialize(peer, frame: frame, control: controlAllowed,
+                                 resetSequence: HostFrameNumberPolicy.resetsSequence(for: .displayLayoutChange))
             return
         }
         let data = try HostedScreenMessage.fullFrame(frame, sequence: nextSequence)
@@ -551,12 +570,12 @@ public actor UltraViewerHostSession {
         diagnostics.framesSent += 1
     }
 
-    private func scheduleCapture() {
+    private func scheduleCapture(after delay: TimeInterval) {
         guard peerPhase == .streaming, !waitingForAck, captureTicket == nil, let id = peer?.request.id else { return }
         captureTimer?.cancel()
         let token = generation
         captureTimer = Task { [weak self] in
-            do { try await Task.sleep(seconds: 0.25); await self?.requestCapture(token: token, session: id) } catch {}
+            do { try await Task.sleep(seconds: delay); await self?.requestCapture(token: token, session: id) } catch {}
         }
     }
 
@@ -702,6 +721,50 @@ public actor UltraViewerHostSession {
         guard fields.count == 3, fields.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy({ (48...57).contains($0) }) }) else { return false }
         let values = fields.compactMap { Int($0) }
         return values.count == 3 && values[0] >= 6
+    }
+}
+
+/// Delay between a viewer frame acknowledgment and the next host capture.
+/// Acknowledgment is the real backpressure (one frame in flight, no queue of
+/// stale frames), so these delays only keep the capture loop from spinning; they
+/// are not a fixed frame-rate limit. A pixel-identical capture waits longer
+/// before re-checking the screen so an idle desktop is not captured continuously.
+struct HostCapturePacing: Sendable, Equatable {
+    /// Delay before re-capturing after the viewer acknowledged a sent frame.
+    let changedFrameDelay: TimeInterval
+    /// Delay before re-checking the screen after a capture produced no changes.
+    let unchangedFrameDelay: TimeInterval
+
+    static let standard = HostCapturePacing(changedFrameDelay: 0.04, unchangedFrameDelay: 0.25)
+
+    init(changedFrameDelay: TimeInterval = 0.04, unchangedFrameDelay: TimeInterval = 0.25) {
+        self.changedFrameDelay = changedFrameDelay
+        self.unchangedFrameDelay = unchangedFrameDelay
+    }
+
+    func delay(afterFrameChanged changed: Bool) -> TimeInterval {
+        changed ? changedFrameDelay : unchangedFrameDelay
+    }
+}
+
+/// Frame-number policy when the host sends a fresh screen initialization.
+/// The Windows decoder requires each incoming frame number to be exactly the
+/// previous one plus one and only restarts its counter for a new viewer session
+/// (see `ModernScreenRenderer.resetFrameNumber`). A display/layout change during
+/// an existing stream therefore keeps the current number, while approval and a
+/// viewer re-login start from the first number again.
+enum HostFrameNumberPolicy {
+    enum Reinitialization: Sendable, Equatable {
+        case freshApproval
+        case viewerRelogin
+        case displayLayoutChange
+    }
+
+    static func resetsSequence(for reason: Reinitialization) -> Bool {
+        switch reason {
+        case .freshApproval, .viewerRelogin: return true
+        case .displayLayoutChange: return false
+        }
     }
 }
 

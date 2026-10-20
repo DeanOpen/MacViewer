@@ -127,13 +127,19 @@ final class MacHostInputController {
     private var keyOrder: [CGKeyCode] = []
     private var heldButtons: Set<UInt32> = []
     private var pointer: CGPoint?
+    /// Display region the last accepted remote pointer was clamped into.
+    private var pointerRegionIndex: Int?
     private var capsLock = false
     private var wheelRemainder: Int32 = 0
 
     init(geometry: MacCaptureGeometry? = nil) { self.geometry = geometry }
 
     func setGeometry(_ value: MacCaptureGeometry?) {
-        if geometry != value { releaseAll(); pointer = nil }
+        if geometry != value {
+            releaseAll()
+            pointer = nil
+            pointerRegionIndex = nil
+        }
         geometry = value
     }
 
@@ -147,7 +153,8 @@ final class MacHostInputController {
         case let .mouse(mouse):
             switch mouse {
             case let .move(wParam, x, y):
-                let point = geometry.mapPoint(x: x, y: y)
+                let mapping = geometry.mapPointer(x: x, y: y, preferredRegionIndex: pointerRegionIndex)
+                let point = mapping.point
                 let button: CGMouseButton = heldButtons.contains(0) ? .left : (heldButtons.contains(1) ? .right : .center)
                 let type: CGEventType = heldButtons.contains(0) ? .leftMouseDragged
                     : (heldButtons.contains(1) ? .rightMouseDragged : (heldButtons.contains(2) ? .otherMouseDragged : .mouseMoved))
@@ -156,23 +163,28 @@ final class MacHostInputController {
                 event.flags = flags(mouseWord: wParam)
                 event.post(tap: .cghidEventTap)
                 pointer = point
+                pointerRegionIndex = mapping.regionIndex
             case let .button(button, wParam, _):
                 // Original Windows click lParam is viewer-client coordinates.
-                // Use the separately transmitted, scaled cursor position.
+                // Use the separately transmitted, scaled cursor position, and
+                // never substitute this Mac's own pointer when no remote
+                // position has been accepted since the last geometry change.
+                guard let point = currentPoint() else { return true }
                 switch button {
-                case .leftDown: try postButton(.left, pressed: true, mouseWord: wParam)
-                case .leftUp: try postButton(.left, pressed: false, mouseWord: wParam)
-                case .rightDown: try postButton(.right, pressed: true, mouseWord: wParam)
-                case .rightUp: try postButton(.right, pressed: false, mouseWord: wParam)
-                case .middleDown: try postButton(.center, pressed: true, mouseWord: wParam)
-                case .middleUp: try postButton(.center, pressed: false, mouseWord: wParam)
+                case .leftDown: try postButton(.left, pressed: true, mouseWord: wParam, at: point)
+                case .leftUp: try postButton(.left, pressed: false, mouseWord: wParam, at: point)
+                case .rightDown: try postButton(.right, pressed: true, mouseWord: wParam, at: point)
+                case .rightUp: try postButton(.right, pressed: false, mouseWord: wParam, at: point)
+                case .middleDown: try postButton(.center, pressed: true, mouseWord: wParam, at: point)
+                case .middleUp: try postButton(.center, pressed: false, mouseWord: wParam, at: point)
                 case .leftDoubleClick, .rightDoubleClick, .middleDoubleClick:
                     let which: CGMouseButton = button == .leftDoubleClick ? .left
                         : (button == .rightDoubleClick ? .right : .center)
-                    try postButton(which, pressed: true, mouseWord: wParam, clickCount: 2)
-                    try postButton(which, pressed: false, mouseWord: wParam, clickCount: 2)
+                    try postButton(which, pressed: true, mouseWord: wParam, at: point, clickCount: 2)
+                    try postButton(which, pressed: false, mouseWord: wParam, at: point, clickCount: 2)
                 }
             case let .verticalWheel(wParam, _):
+                guard let point = currentPoint() else { return true }
                 wheelRemainder += Int32(Int16(bitPattern: UInt16(truncatingIfNeeded: UInt32(bitPattern: wParam) >> 16)))
                 let steps = wheelRemainder / 120
                 wheelRemainder %= 120
@@ -181,7 +193,7 @@ final class MacHostInputController {
                                               wheel1: steps, wheel2: 0, wheel3: 0) else {
                         throw MacHostInputError.eventCreationFailed
                     }
-                    event.location = currentPoint()
+                    event.location = point
                     event.flags = flags(mouseWord: wParam)
                     event.post(tap: .cghidEventTap)
                 }
@@ -193,10 +205,15 @@ final class MacHostInputController {
     /// Call on peer disconnect, local Stop Sharing, control revocation, and app
     /// shutdown. Release remembered input even when no later key-up arrives.
     func releaseAll() {
+        let point = currentPoint()
         if AXIsProcessTrusted() {
             for code in keyOrder.reversed() { try? postKey(code, pressed: false, character: heldKeys[code] ?? 0) }
-            for raw in heldButtons.sorted() {
-                if let button = CGMouseButton(rawValue: raw) { try? postButton(button, pressed: false, mouseWord: 0) }
+            if let point {
+                for raw in heldButtons.sorted() {
+                    if let button = CGMouseButton(rawValue: raw) {
+                        try? postButton(button, pressed: false, mouseWord: 0, at: point)
+                    }
+                }
             }
         }
         heldKeys.removeAll(); keyOrder.removeAll(); heldButtons.removeAll()
@@ -258,12 +275,16 @@ final class MacHostInputController {
         event.post(tap: .cghidEventTap)
     }
 
-    private func currentPoint() -> CGPoint {
-        let point = pointer ?? CGEvent(source: nil)?.location ?? CGPoint.zero
-        return geometry?.clampGlobalPoint(point) ?? point
+    /// Injection point of the last accepted remote pointer. The local Mac
+    /// pointer is never used as a fallback: a button or wheel that arrives
+    /// before any remote position is accepted must be dropped.
+    private func currentPoint() -> CGPoint? {
+        guard let pointer else { return nil }
+        return geometry?.clampGlobalPoint(pointer) ?? pointer
     }
 
-    private func postButton(_ button: CGMouseButton, pressed: Bool, mouseWord: Int32, clickCount: Int64 = 1) throws {
+    private func postButton(_ button: CGMouseButton, pressed: Bool, mouseWord: Int32,
+                            at point: CGPoint, clickCount: Int64 = 1) throws {
         if !pressed, !heldButtons.contains(button.rawValue) { return }
         let type: CGEventType
         switch button {
@@ -271,7 +292,7 @@ final class MacHostInputController {
         case .right: type = pressed ? .rightMouseDown : .rightMouseUp
         default: type = pressed ? .otherMouseDown : .otherMouseUp
         }
-        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: currentPoint(),
+        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point,
                                   mouseButton: button) else { throw MacHostInputError.eventCreationFailed }
         event.flags = flags(mouseWord: mouseWord)
         event.setIntegerValueField(.mouseEventClickState, value: clickCount)

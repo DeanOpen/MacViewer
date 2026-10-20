@@ -54,8 +54,22 @@ enum MacScreenCaptureError: LocalizedError, Equatable {
 /// Stateless conversion helpers are testable without requesting/capturing a
 /// screen. The transport encoder reverses these bottom-up rows into wire order.
 enum MacScreenPixels {
-    static let maximumWidth = 3840
-    static let maximumHeight = 2160
+    /// Canvas dimensions are bounded by the protocol limit and the host frame
+    /// budget; arrangements are no longer forced into a 16:9 box, so a
+    /// 5760x1080 desktop (three 1080p displays side by side) is valid.
+    static let maximumDimension = HostedScreenMessage.maximumDimension
+    static let maximumOutputBytes = HostedScreenMessage.maximumPayloadBytes
+
+    static func validOutputSize(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0,
+              width <= maximumDimension, height <= maximumDimension else { return false }
+        // Division first keeps the product from overflowing for hostile sizes.
+        guard width <= maximumOutputBytes / height else { return false }
+        return width * height * 2 <= maximumOutputBytes
+    }
+
+    /// Compatibility helper retained for callers that scale a single captured
+    /// image to 1080p; the host capture path uses `MacDisplayLayout` budgets.
     static func scaledSize(width: Int, height: Int) throws -> (width: Int, height: Int) {
         guard width > 0, height > 0 else { throw MacScreenCaptureError.invalidFrame }
         let scale = min(1, min(1920 / Double(width), 1080 / Double(height)))
@@ -64,7 +78,7 @@ enum MacScreenPixels {
     }
 
     static func rgb555BottomUp(rgbaTopDown: Data, width: Int, height: Int, bytesPerRow: Int) throws -> Data {
-        guard width > 0, height > 0, width <= maximumWidth, height <= maximumHeight,
+        guard validOutputSize(width: width, height: height),
               bytesPerRow >= width * 4, bytesPerRow <= Int.max / height,
               rgbaTopDown.count >= bytesPerRow * height else { throw MacScreenCaptureError.invalidFrame }
         var result = Data(count: width * height * 2)
@@ -88,7 +102,7 @@ enum MacScreenPixels {
     static func rgb555BottomUp(image: CGImage) throws -> Data {
         let width = image.width
         let height = image.height
-        guard width > 0, height > 0, width <= maximumWidth, height <= maximumHeight,
+        guard validOutputSize(width: width, height: height),
               let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { throw MacScreenCaptureError.invalidFrame }
         var rgba = Data(count: width * height * 4)
         let rendered = rgba.withUnsafeMutableBytes { bytes -> Bool in

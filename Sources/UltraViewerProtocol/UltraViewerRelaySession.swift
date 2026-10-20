@@ -780,12 +780,21 @@ public actor UltraViewerRelaySession {
             }
             let name = peerInfo.flatMap { Data(base64Encoded: $0.computerNameField) }
                 .flatMap { String(data: $0, encoding: .utf8) }
+            let monitors = (try? RemoteControlCommands.monitors(
+                from: initialization.monitorInformationBytes ?? Data())) ?? []
+            // Monitor crops, the visible cursor and reverse input offsets all use
+            // this derived origin, so a host that omits parts 9/10 or declares an
+            // origin right/below a monitor still crops correctly.
+            let origin = RemoteControlCommands.effectiveVirtualOrigin(
+                declaredLeft: initialization.virtualLeft ?? 0,
+                declaredTop: initialization.virtualTop ?? 0,
+                monitors: monitors)
             let peer = Peer(displayName: name, version: version,
                 width: initialization.width, height: initialization.height,
-                virtualLeft: initialization.virtualLeft ?? 0, virtualTop: initialization.virtualTop ?? 0,
+                virtualLeft: origin.left, virtualTop: origin.top,
                 supportsBinaryKeyboard: Self.version(version, atLeast: [6, 2, 13]),
                 allowsRemoteInput: !remoteViewOnly,
-                monitors: (try? RemoteControlCommands.monitors(from: initialization.monitorInformationBytes ?? Data())) ?? [])
+                monitors: monitors)
             // Frames for the new screen must not reach the consumer ahead of
             // this event through a frame event that is still queued.
             latestFrame = LatestScreenFrame()

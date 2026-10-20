@@ -22,7 +22,8 @@ public enum ModernScreenMessageError: Error, Equatable, LocalizedError {
         case .unsupportedCommand: "Windows sent an unsupported screen update."
         case .missingPart, .malformedPart: "Windows sent an incomplete screen update."
         case .invalidGeometry: "Windows sent an invalid screen rectangle."
-        case .sizeLimitExceeded: "The Windows screen update exceeds the supported size."
+        case .sizeLimitExceeded:
+            "The remote desktop is larger than this viewer supports. Select a single monitor in UltraViewer on the Windows computer or lower the desktop resolution, then reconnect."
         case .unsupportedColorMode: "The Windows screen color mode is not supported."
         case .sequenceMismatch: "Windows screen updates arrived out of order. Reconnect to refresh the screen."
         case .decompressedLengthMismatch: "The Windows screen update has an invalid pixel count."
@@ -45,8 +46,12 @@ public struct ModernScreenLimits: Equatable, Sendable {
     public let maximumAuxiliaryTiles: Int
     public let maximumAtlasDimension: Int
 
-    public init(maximumDimension: Int = 8192,
-                maximumPixels: Int = 16 * 1024 * 1024,
+    /// These defaults cover common multi-monitor Windows desktops: three 4K
+    /// displays side by side (11,520 × 2,160) and two 5K displays
+    /// (10,240 × 2,880) both fit, while the 32-megapixel cap still bounds the
+    /// renderer's BGRA and temporary buffers.
+    public init(maximumDimension: Int = 16_384,
+                maximumPixels: Int = 32_000_000,
                 maximumPayloadBytes: Int = 64 * 1024 * 1024,
                 maximumDecompressedBytes: Int = 128 * 1024 * 1024,
                 maximumRecordsPerPart: Int = 16_384,
@@ -151,10 +156,15 @@ public struct ModernScreenInitialization: Equatable, Sendable {
         // Part 13 is consumed only when native width/height changed. This
         // stateless screen-fields decoder leaves that capability uninterpreted;
         // its presence alone does not establish that the byte is consumed.
+        // Parts 9/10 are optional and independent: a host can send monitor
+        // rectangles without declaring a desktop origin, and vice versa. A
+        // missing origin is nil (the relay derives one from the monitors).
         var left: Int32?
         var top: Int32?
-        if parts.count > 8 {
+        if parts.count > 9 {
             left = try ScreenPartReader.int32Part(parts, index: 9)
+        }
+        if parts.count > 10 {
             top = try ScreenPartReader.int32Part(parts, index: 10)
         }
         let tileSize: Int
