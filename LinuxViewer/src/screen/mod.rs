@@ -142,7 +142,8 @@ impl ScreenInit {
         let mut out = Vec::new();
         for record in body.split('|') {
             let n: Vec<i32> = record.split(':').filter_map(|f| f.parse().ok()).collect();
-            if n.len() != 4 || n[2] <= n[0] || n[3] <= n[1] {
+            if n.len() != 4 || n[2] <= n[0] || n[3] <= n[1]
+                || n[2] as i64 - n[0] as i64 > i32::MAX as i64 || n[3] as i64 - n[1] as i64 > i32::MAX as i64 {
                 return vec![];
             }
             out.push([n[0], n[1], n[2], n[3]]);
@@ -302,6 +303,23 @@ pub(crate) mod tests {
         assert_eq!(init.monitors().len(), 2);
         assert_eq!(init.origin(), (-1920, -200));
         assert_eq!(ScreenInit::default().origin(), (0, 0));
+    }
+
+    #[test]
+    fn monitors_parse_like_remote_control_commands() {
+        let m = |t: &[u8]| ScreenInit { monitor_info: Some(t.to_vec()), ..Default::default() }.monitors();
+        assert_eq!(m(b"-1920:0:0:1080|0:-200:2560:1240|"), [[-1920, 0, 0, 1080], [0, -200, 2560, 1240]]);
+        assert_eq!(m(b"0:0:1920:1080|\0\0"), [[0, 0, 1920, 1080]]);
+        assert!(m(b"").is_empty());
+        for bad in [&b"\00:0:1920:1080|"[..], b"0:0:1920:1080|\0 ", b"0:0:1920:1080|\00|", b"Mac|", b"0:0:1920:1080",
+                    b"0:0:1920|", b"0:0:1920:1080||", b"0:0:1:1:2|", b"0:0:2147483648:1|", b"0: 0:1:1|",
+                    b"1:0:1:1|", b"0:1:1:0|", b"-2147483648:0:2147483647:1|"] {
+            assert!(m(bad).is_empty(), "{:?}", String::from_utf8_lossy(bad));
+        }
+        let o = |l, t, info: &[u8]| ScreenInit { monitor_info: Some(info.to_vec()), virtual_left: Some(l), virtual_top: Some(t), ..Default::default() }.origin();
+        assert_eq!(o(0, 0, b"-1920:0:0:1080|0:-200:2560:1240|"), (-1920, -200));
+        assert_eq!(o(10, 20, b""), (10, 20));
+        assert_eq!(o(i32::MAX, i32::MAX, b"-2147483648:0:-2147483647:1|"), (i32::MIN, 0));
     }
 
     #[test]

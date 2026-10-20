@@ -209,3 +209,53 @@ jobs:
       - name: Clean up keychain
         if: always() && steps.cert.outputs.identity != '-'
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+  linux-release:
+    name: Build & publish LinuxViewer
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Resolve version
+        run: |
+          version="${TAG#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          case "$version" in
+            *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;;
+            *)   echo "PRERELEASE=false" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: System packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxkbcommon-dev libx11-dev libxcb1-dev libasound2-dev libpipewire-0.3-dev libclang-dev clang pkg-config dpkg-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LinuxViewer
+
+      - name: Test
+        run: cargo test --locked
+        working-directory: LinuxViewer
+
+      - name: Package
+        env:
+          LINUXVIEWER_VERSION: ${{ env.VERSION }}
+        run: scripts/package_linux.sh
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ env.PRERELEASE }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/linux/linuxviewer-${{ env.VERSION }}-x86_64.tar.gz
+            dist/linux/linuxviewer_${{ env.VERSION }}_amd64.deb
+            dist/linux/SHA256SUMS-linux.txt

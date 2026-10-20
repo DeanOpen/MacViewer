@@ -82,6 +82,12 @@ impl CommandConnection {
     /// Command 8: looks up `target_id` and waits for the `8:` reply with the same
     /// correlation number. Status 2 is a wrong password.
     pub fn lookup(&mut self, target_id: &str, password: &str, local_password: &str) -> Result<PeerInfo> {
+        self.lookup_with(target_id, password, local_password, "")
+    }
+
+    /// `lookup` advertising a LAN-direct listener (messages::direct_details_text).
+    pub fn lookup_with(&mut self, target_id: &str, password: &str, local_password: &str,
+                       direct_details: &str) -> Result<PeerInfo> {
         let correlation = loop {
             let b = crate::wire::random_bytes(4);
             let n = i32::from_le_bytes([b[0], b[1], b[2], b[3]]) & i32::MAX;
@@ -89,8 +95,11 @@ impl CommandConnection {
                 break n;
             }
         };
-        let text = messages::lookup_text(target_id, password, &self.reply.id, local_password,
-                                         correlation, local_utc_offset_minutes())?;
+        let text = messages::lookup_fields(&messages::LookupRequest {
+            target_id, password, license: "", license2: "", local_id: &self.reply.id, local_password, correlation,
+            referral: "0", payment: "0", tz_offset_minutes: local_utc_offset_minutes(), dictionary_count: 1,
+            direct_details,
+        })?;
         self.sender.send(text.as_bytes())?;
         let deadline = Instant::now() + REPLY_TIMEOUT;
         loop {

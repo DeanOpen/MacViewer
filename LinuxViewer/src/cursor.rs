@@ -154,10 +154,48 @@ pub struct CursorImage {
     pub pixels: Vec<u32>,
 }
 
-/// Uncompressed CUR DIB: header, optional palette, DWORD-padded XOR rows, then
-/// 1bpp AND rows. PNG resources and inverting (AND=1, XOR!=0) masks are not
-/// supported; callers fall back to a default arrow.
+const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+
+/// Decode a cursor resource: PNG, or an uncompressed DIB (header, optional
+/// palette, DWORD-padded XOR rows, then 1bpp AND rows). Inverting pixels
+/// (AND=1, XOR!=0), which Windows composites against the desktop, are drawn
+/// white with a black outline so they stay visible on any background.
 pub fn decode_image(file: &CursorFile) -> Option<CursorImage> {
+    if !(1..=256).contains(&file.width) || !(1..=256).contains(&file.height) {
+        return None;
+    }
+    if file.resource.starts_with(&PNG_SIGNATURE) {
+        return decode_png(file);
+    }
+    decode_dib(file)
+}
+
+fn decode_png(file: &CursorFile) -> Option<CursorImage> {
+    let mut d = png::Decoder::new(file.resource.as_slice());
+    d.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = d.read_info().ok()?;
+    let (w, h) = (reader.info().width as usize, reader.info().height as usize);
+    if w != file.width || h != file.height {
+        return None;
+    }
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let data = &buf[..info.buffer_size()];
+    let px = |r: u8, g: u8, b: u8, a: u8| if a == 0 { 0 } else { (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | b as u32 };
+    let pixels: Vec<u32> = match info.color_type {
+        png::ColorType::Rgba => data.chunks_exact(4).map(|p| px(p[0], p[1], p[2], p[3])).collect(),
+        png::ColorType::Rgb => data.chunks_exact(3).map(|p| px(p[0], p[1], p[2], 255)).collect(),
+        png::ColorType::GrayscaleAlpha => data.chunks_exact(2).map(|p| px(p[0], p[0], p[0], p[1])).collect(),
+        png::ColorType::Grayscale => data.iter().map(|g| px(*g, *g, *g, 255)).collect(),
+        _ => return None,
+    };
+    if pixels.len() != w * h {
+        return None;
+    }
+    Some(CursorImage { width: w, height: h, hot_x: file.hot_x as usize, hot_y: file.hot_y as usize, pixels })
+}
+
+fn decode_dib(file: &CursorFile) -> Option<CursorImage> {
     let (width, height) = (file.width, file.height);
     let b = &file.resource;
     if b.len() < 16 || !(long(b, 0) == 12 || long(b, 16) == 0) {
@@ -196,6 +234,7 @@ pub fn decode_image(file: &CursorFile) -> Option<CursorImage> {
     }
     let uses_alpha = bits == 32 && (0..height).any(|r| (0..width).any(|x| b[px_off + r * stride + x * 4 + 3] != 0));
     let mut pixels = vec![0u32; width * height];
+    let mut inverted = vec![false; width * height];
     for y in 0..height {
         let sy = if top_down { y } else { height - 1 - y };
         let row = px_off + sy * stride;
@@ -231,11 +270,29 @@ pub fn decode_image(file: &CursorFile) -> Option<CursorImage> {
             }
             if !uses_alpha && b[mrow + x / 8] & (0x80 >> (x % 8)) != 0 {
                 if bl != 0 || g != 0 || r != 0 {
-                    return None;
+                    inverted[y * width + x] = true;
+                    continue;
                 }
                 a = 0;
             }
             pixels[y * width + x] = if a == 0 { 0 } else { (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | bl as u32 };
+        }
+    }
+    for y in 0..height {
+        for x in 0..width {
+            if !inverted[y * width + x] {
+                continue;
+            }
+            pixels[y * width + x] = 0xffff_ffff;
+            for (dx, dy) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+                let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                if nx >= 0 && ny >= 0 && (nx as usize) < width && (ny as usize) < height {
+                    let n = ny as usize * width + nx as usize;
+                    if !inverted[n] && pixels[n] == 0 {
+                        pixels[n] = 0xff00_0000;
+                    }
+                }
+            }
         }
     }
     Some(CursorImage { width, height, hot_x: file.hot_x as usize, hot_y: file.hot_y as usize, pixels })
@@ -254,18 +311,39 @@ pub fn default_arrow() -> CursorImage {
     CursorImage { width: 11, height: 16, hot_x: 0, hot_y: 0, pixels }
 }
 
-/// Viewer-side cursor state: shape cache by hash, selection and position.
-#[derive(Default)]
+/// Viewer-side cursor state (RemoteCursorPresenter.swift): an LRU shape cache
+/// by hash, bounded duplicate-suppressed shape requests, selection, position.
 pub struct CursorState {
-    shapes: HashMap<i32, Option<CursorImage>>,
-    order: Vec<i32>,
+    shapes: HashMap<i32, Option<CursorImage>>, // None: unsupported, show the arrow
+    recency: Vec<i32>,
+    bytes: usize,
+    pending: Vec<i32>,
     selected: Option<i32>,
+    max_shapes: usize,
+    max_bytes: usize,
     /// Remote virtual-desktop position, if the host sends positions (command 28).
     pub position: Option<(i32, i32)>,
 }
 
+impl Default for CursorState {
+    fn default() -> Self {
+        Self::with_limits(64, 64 * 256 * 256 * 4)
+    }
+}
+
+fn image_bytes(s: &Option<CursorImage>) -> usize {
+    s.as_ref().map_or(0, |i| i.pixels.len() * 4)
+}
+
 impl CursorState {
-    /// Returns a "4|||hash" request to send when a selected shape is unknown.
+    pub fn with_limits(max_shapes: usize, max_bytes: usize) -> Self {
+        CursorState {
+            shapes: HashMap::new(), recency: Vec::new(), bytes: 0, pending: Vec::new(), selected: None,
+            max_shapes, max_bytes, position: None,
+        }
+    }
+
+    /// Returns a "4|||hash" request to send when a newly selected shape is unknown.
     pub fn apply(&mut self, c: Cursor) -> Option<Vec<u8>> {
         match c {
             Cursor::Selection(h) if h == IGNORED_SELECTION_HASH => None,
@@ -273,18 +351,37 @@ impl CursorState {
                 self.selected = Some(h);
                 if self.shapes.contains_key(&h) {
                     self.touch(h);
-                    None
-                } else {
-                    Some(shape_request(h))
+                    return None;
                 }
+                if self.pending.contains(&h) {
+                    return None;
+                }
+                while self.pending.len() >= self.max_shapes {
+                    self.pending.remove(0);
+                }
+                self.pending.push(h);
+                Some(shape_request(h))
             }
             Cursor::Shape { hash, file } => {
-                self.shapes.insert(hash, decode_image(&file));
-                self.touch(hash);
-                while self.order.len() > 256 {
-                    let old = self.order.remove(0);
-                    self.shapes.remove(&old);
+                self.pending.retain(|p| *p != hash);
+                let mut shape = decode_image(&file);
+                if image_bytes(&shape) > self.max_bytes {
+                    shape = None;
                 }
+                if let Some(old) = self.shapes.remove(&hash) {
+                    self.bytes -= image_bytes(&old);
+                }
+                self.recency.retain(|r| *r != hash);
+                let need = image_bytes(&shape);
+                while !self.recency.is_empty() && (self.shapes.len() >= self.max_shapes || need > self.max_bytes - self.bytes) {
+                    let oldest = self.recency.remove(0);
+                    if let Some(old) = self.shapes.remove(&oldest) {
+                        self.bytes -= image_bytes(&old);
+                    }
+                }
+                self.bytes += need;
+                self.shapes.insert(hash, shape);
+                self.recency.push(hash);
                 None
             }
             Cursor::Position { x, y } => {
@@ -295,17 +392,34 @@ impl CursorState {
     }
 
     fn touch(&mut self, h: i32) {
-        self.order.retain(|o| *o != h);
-        self.order.push(h);
+        self.recency.retain(|o| *o != h);
+        self.recency.push(h);
     }
 
     pub fn selected(&self) -> Option<i32> {
         self.selected
     }
 
-    /// The shape to draw now (None = selected shape still unknown or unsupported).
+    /// The selected shape (None = unknown or unsupported: draw the arrow).
     pub fn image(&self) -> Option<&CursorImage> {
         self.selected.and_then(|h| self.shapes.get(&h)).and_then(|s| s.as_ref())
+    }
+
+    pub fn cache_entry_count(&self) -> usize {
+        self.shapes.len()
+    }
+
+    pub fn cache_byte_count(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn pending_request_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// New session: forget shapes, requests, selection and position.
+    pub fn reset(&mut self) {
+        *self = Self::with_limits(self.max_shapes, self.max_bytes);
     }
 }
 
@@ -406,5 +520,192 @@ mod tests {
         assert_eq!(s.image(), Some(&img));
         assert_eq!(s.apply(Cursor::Selection(9)), None);
         assert_eq!(default_arrow().pixels.len(), 11 * 16);
+    }
+
+    fn cur_file(w: u8, h: u8, resource: &[u8]) -> CursorFile {
+        let mut cur = vec![0, 0, 2, 0, 1, 0, w, h, 0, 0, 0, 0, 0, 0];
+        cur.extend((resource.len() as u32).to_le_bytes());
+        cur.extend(22u32.to_le_bytes());
+        cur.extend(resource);
+        CursorFile::decode(&cur).unwrap()
+    }
+
+    #[test]
+    fn png_resource() {
+        let mut data = Vec::new();
+        {
+            let mut e = png::Encoder::new(&mut data, 2, 1);
+            e.set_color(png::ColorType::Rgba);
+            e.set_depth(png::BitDepth::Eight);
+            e.write_header().unwrap().write_image_data(&[255, 0, 0, 255, 0, 0, 255, 0]).unwrap();
+        }
+        let img = decode_image(&cur_file(2, 1, &data)).unwrap();
+        assert_eq!(img.pixels, [0xffff0000, 0]);
+        assert!(decode_image(&cur_file(3, 1, &data)).is_none());
+    }
+
+    #[test]
+    fn inverting_mask_becomes_outlined() {
+        // 3x1 monochrome DIB: palette black/white, XOR = 0,1,0, AND = 1,1,1.
+        let mut dib = vec![0u8; 40];
+        dib[0] = 40;
+        dib[4] = 3;
+        dib[8] = 2;
+        dib[12] = 1;
+        dib[14] = 1;
+        dib.extend([0, 0, 0, 0, 255, 255, 255, 0]);
+        dib.extend([0b0100_0000, 0, 0, 0]);
+        dib.extend([0b1110_0000, 0, 0, 0]);
+        let img = decode_image(&cur_file(3, 1, &dib)).unwrap();
+        assert_eq!(img.pixels, [0xff000000, 0xffffffff, 0xff000000]);
+    }
+
+    fn dib(w: u32, h: u32, bits: u16, top_down: bool, colors: &[u8], used: u32, rows: &[u8], mask: &[u8]) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend(40u32.to_le_bytes());
+        d.extend(w.to_le_bytes());
+        d.extend(((if top_down { -2 } else { 2 }) * h as i32).to_le_bytes());
+        d.extend([1, 0]);
+        d.extend(bits.to_le_bytes());
+        for v in [0, rows.len() as u32, 0, 0, used, 0] {
+            d.extend(v.to_le_bytes());
+        }
+        d.extend(colors);
+        d.extend(rows);
+        d.extend(mask);
+        d
+    }
+
+    fn cursor_with(resource: &[u8], w: u8, h: u8, hx: u16, hy: u16) -> CursorFile {
+        let mut c = vec![0, 0, 2, 0, 1, 0, w, h, 0, 0];
+        c.extend(hx.to_le_bytes());
+        c.extend(hy.to_le_bytes());
+        c.extend((resource.len() as u32).to_le_bytes());
+        c.extend(22u32.to_le_bytes());
+        c.extend(resource);
+        CursorFile::decode(&c).unwrap()
+    }
+
+    fn white_png(w: u32, h: u32) -> Vec<u8> {
+        let mut data = Vec::new();
+        let mut e = png::Encoder::new(&mut data, w, h);
+        e.set_color(png::ColorType::Rgba);
+        e.set_depth(png::BitDepth::Eight);
+        e.write_header().unwrap().write_image_data(&vec![255; (w * h * 4) as usize]).unwrap();
+        data
+    }
+
+    fn bgra(img: &CursorImage) -> Vec<u8> {
+        img.pixels.iter().flat_map(|p| p.to_le_bytes()).collect()
+    }
+
+    fn shape(hash: i32, file: CursorFile) -> Cursor {
+        Cursor::Shape { hash, file }
+    }
+
+    #[test]
+    fn missing_selection_requests_are_suppressed() {
+        let mut s = CursorState::default();
+        assert!(s.image().is_none());
+        assert_eq!(s.apply(Cursor::Selection(-17)), Some(shape_request(-17)));
+        assert_eq!(s.apply(Cursor::Selection(-17)), None);
+        assert_eq!(s.pending_request_count(), 1);
+        s.apply(Cursor::Position { x: -1920, y: 32767 });
+        assert_eq!(s.position, Some((-1920, 32767)));
+        s.apply(Cursor::Selection(IGNORED_SELECTION_HASH));
+        assert_eq!((s.selected(), s.pending_request_count()), (Some(-17), 1));
+    }
+
+    #[test]
+    fn png_resource_with_hotspot() {
+        let mut s = CursorState::default();
+        assert!(s.apply(Cursor::Selection(5)).is_some());
+        s.apply(shape(5, cursor_with(&white_png(2, 2), 2, 2, 1, 1)));
+        let img = s.image().unwrap();
+        assert_eq!((img.width, img.height, img.hot_x, img.hot_y), (2, 2, 1, 1));
+        assert_eq!((s.cache_entry_count(), s.cache_byte_count(), s.pending_request_count()), (1, 16, 0));
+        assert_eq!(s.apply(Cursor::Selection(5)), None);
+    }
+
+    #[test]
+    fn late_shape_replies_do_not_replace_the_selection() {
+        let png = white_png(2, 2);
+        let mut s = CursorState::default();
+        s.apply(Cursor::Selection(1));
+        s.apply(Cursor::Selection(2));
+        s.apply(shape(1, cursor_with(&png, 2, 2, 0, 0)));
+        assert!(s.image().is_none());
+        s.apply(shape(2, cursor_with(&png, 2, 2, 1, 1)));
+        assert_eq!(s.image().unwrap().hot_x, 1);
+        assert_eq!(s.apply(Cursor::Selection(1)), None);
+        assert_eq!(s.image().unwrap().hot_x, 0);
+    }
+
+    #[test]
+    fn budgets_evict_least_recently_selected() {
+        let mut s = CursorState::with_limits(2, 32);
+        let c = cursor_with(&white_png(2, 2), 2, 2, 0, 0);
+        s.apply(shape(1, c.clone()));
+        s.apply(shape(2, c.clone()));
+        s.apply(Cursor::Selection(1));
+        s.apply(shape(3, c));
+        assert_eq!(s.cache_entry_count(), 2);
+        assert!(s.apply(Cursor::Selection(2)).is_some());
+        assert!(s.apply(Cursor::Selection(1)).is_none());
+    }
+
+    #[test]
+    fn dib_alpha_overrides_and_mask() {
+        let alpha = dib(2, 1, 32, false, &[], 0, &[0, 0, 255, 128, 0, 255, 0, 0], &[0xc0, 0, 0, 0]);
+        assert_eq!(bgra(&decode_image(&cursor_with(&alpha, 2, 1, 0, 0)).unwrap()), [0, 0, 255, 128, 0, 0, 0, 0]);
+        let legacy = dib(2, 1, 32, false, &[], 0, &[0, 0, 0, 0, 0, 0, 255, 0], &[0x80, 0, 0, 0]);
+        assert_eq!(bgra(&decode_image(&cursor_with(&legacy, 2, 1, 0, 0)).unwrap()), [0, 0, 0, 0, 0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn top_down_24bit_dib_honors_row_padding() {
+        let d = dib(3, 2, 24, true, &[], 0, &[0, 255, 255, 255, 0, 255, 255, 255, 0, 0xaa, 0xbb, 0xcc,
+                                              0, 0, 255, 0, 255, 0, 255, 0, 0, 0xdd, 0xee, 0xff], &[0; 8]);
+        assert_eq!(bgra(&decode_image(&cursor_with(&d, 3, 2, 0, 0)).unwrap()),
+                   [0, 255, 255, 255, 255, 0, 255, 255, 255, 255, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn monochrome_dib_palette_and_bottom_up_masks() {
+        let d = dib(3, 2, 1, false, &[0, 0, 0, 0, 255, 255, 255, 0], 2, &[0x40, 0, 0, 0, 0xa0, 0, 0, 0], &[0, 0, 0, 0, 0x40, 0, 0, 0]);
+        assert_eq!(bgra(&decode_image(&cursor_with(&d, 3, 2, 0, 0)).unwrap()),
+                   [255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn malformed_dibs_fall_back() {
+        let valid = dib(2, 1, 32, false, &[], 0, &[0, 0, 255, 255, 0, 255, 0, 255], &[0; 4]);
+        let bad_palette = dib(2, 1, 8, false, &[0, 0, 0, 0], 1, &[0, 1, 0, 0], &[0; 4]);
+        for (i, d) in [valid[..valid.len() - 1].to_vec(), valid[..43].to_vec(), bad_palette].into_iter().enumerate() {
+            let mut s = CursorState::default();
+            s.apply(Cursor::Selection(i as i32));
+            s.apply(shape(i as i32, cursor_with(&d, 2, 1, 0, 0)));
+            assert!(s.image().is_none());
+            assert_eq!(s.cache_byte_count(), 0);
+        }
+        // Inversion (AND=1, XOR=white) is drawn white with a black outline here,
+        // where MacViewer falls back to the arrow.
+        let inversion = dib(2, 1, 1, false, &[0, 0, 0, 0, 255, 255, 255, 0], 2, &[0x80, 0, 0, 0], &[0x80, 0, 0, 0]);
+        assert_eq!(decode_image(&cursor_with(&inversion, 2, 1, 0, 0)).unwrap().pixels, [0xffffffff, 0xff000000]);
+    }
+
+    #[test]
+    fn pending_hashes_and_reset_are_bounded() {
+        let mut s = CursorState::default();
+        for h in 0..100 {
+            assert!(s.apply(Cursor::Selection(h)).is_some());
+        }
+        assert_eq!(s.pending_request_count(), 64);
+        s.apply(shape(99, cursor_with(&white_png(2, 2), 2, 2, 0, 0)));
+        s.apply(Cursor::Position { x: 100, y: -100 });
+        s.reset();
+        assert_eq!((s.cache_entry_count(), s.cache_byte_count(), s.pending_request_count(), s.selected(), s.position),
+                   (0, 0, 0, None, None));
+        assert!(s.apply(Cursor::Selection(99)).is_some());
     }
 }

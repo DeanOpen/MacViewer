@@ -146,6 +146,21 @@ pub fn decode_multipart(mut b: &[u8]) -> Result<Vec<&[u8]>> {
     Ok(parts)
 }
 
+// --- UTF-16LE helpers (ChatProtocol / ClipboardProtocol / FileTransfer) ---
+
+pub fn utf16le(text: &str) -> Vec<u8> {
+    text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+}
+
+/// Rejects odd lengths and unpaired surrogates.
+pub fn strict_utf16le(bytes: &[u8]) -> Result<String> {
+    if bytes.len() % 2 != 0 {
+        return Err("invalid UTF-16LE text".into());
+    }
+    let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    String::from_utf16(&units).map_err(|_| "invalid UTF-16LE text".into())
+}
+
 // --- LegacyCommandCipher.swift ---
 
 /// 3DES-CBC/PKCS7, key = SHA1(UTF-16LE password) + 4 zero bytes, IV = SHA1("")[..8].

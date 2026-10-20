@@ -92,7 +92,7 @@ pub fn lookup_text(target_id: &str, password: &str, local_id: &str, local_passwo
                    correlation: i32, tz_offset_minutes: i32) -> Result<String> {
     lookup_fields(&LookupRequest {
         target_id, password, license: "", license2: "", local_id, local_password, correlation,
-        referral: "0", payment: "0", tz_offset_minutes, dictionary_count: 1,
+        referral: "0", payment: "0", tz_offset_minutes, dictionary_count: 1, direct_details: "",
     })
 }
 
@@ -108,6 +108,19 @@ pub struct LookupRequest<'a> {
     pub payment: &'a str,
     pub tz_offset_minutes: i32,
     pub dictionary_count: i32,
+    /// PeerLookup.DirectDetails text "cmdPublicIP|cmdPublicPort|localIP|localPort|key", or "".
+    pub direct_details: &'a str,
+}
+
+/// PeerLookup.DirectDetails: advertises this viewer's LAN listener.
+pub fn direct_details_text(command_public_ip: &str, command_public_port: u16, local_ip: &str, local_port: u16,
+                           key: &str) -> Result<String> {
+    let fields = [command_public_ip.to_string(), command_public_port.to_string(), local_ip.to_string(),
+                  local_port.to_string(), key.to_string()];
+    if fields.iter().any(|f| f.is_empty() || f.contains('|') || f.contains(':') || !f.bytes().all(|b| (33..=126).contains(&b))) {
+        return Err("invalid LAN direct details".into());
+    }
+    Ok(fields.join("|"))
 }
 
 pub fn lookup_fields(r: &LookupRequest) -> Result<String> {
@@ -117,12 +130,16 @@ pub fn lookup_fields(r: &LookupRequest) -> Result<String> {
     join_fields(&[
         "8", r.target_id, &md5_hex(&(" ".repeat(32) + r.password)), CLIENT_VERSION, r.license, r.license2,
         r.local_id, &md5_hex(&format!("{}{}", r.local_id, r.local_password)), "-1", &r.correlation.to_string(),
-        "0", r.referral, r.payment, &r.tz_offset_minutes.to_string(), &r.dictionary_count.to_string(), "", "",
+        "0", r.referral, r.payment, &r.tz_offset_minutes.to_string(), &r.dictionary_count.to_string(), "", r.direct_details,
     ])
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeerInfo {
+    /// Field 2: the partner's LAN address (LAN-direct fallback).
+    pub lan_ip: String,
+    /// Field 21: the partner's "ip|port" direct details, when present.
+    pub direct_details: Option<String>,
     pub public_ip: Ipv4,
     pub target_port: u16,
     pub relay_ip: String,
@@ -159,6 +176,7 @@ pub fn parse_lookup_reply(p: &[u8]) -> Result<LookupReply> {
         return Err(route_error().into());
     }
     reply.peer = Some(PeerInfo {
+        lan_ip: f[2].into(), direct_details: f.get(21).map(|s| s.to_string()),
         public_ip, target_port, relay_ip: f[11].into(), relay_hostname: f[14].into(),
         computer_name_b64: f[8].into(), secret_token: f.get(20).copied().unwrap_or("").into(),
     });
@@ -300,8 +318,11 @@ pub(crate) mod tests {
         let text = lookup_fields(&LookupRequest {
             target_id: "peer-17", password: "peer-pass", license: "lic-a", license2: "lic-b", local_id: "local-42",
             local_password: "self-pass", correlation: 42, referral: "1.5", payment: "free", tz_offset_minutes: 420,
-            dictionary_count: 2,
+            dictionary_count: 2, direct_details: "",
         }).unwrap();
+        let direct = direct_details_text("203.0.113.8", 32100, "192.0.2.5", 12000, "key-123456").unwrap();
+        assert_eq!(direct, "203.0.113.8|32100|192.0.2.5|12000|key-123456");
+        assert!(direct_details_text("203.0.113.8", 32100, "192.0.2.5", 12000, "bad|key").is_err());
         assert_eq!(text, "8:peer-17:e3f326c385d2606a12a2d77260e3e81d:6.6.133:lic-a:lic-b:local-42:206a9ce1ea16f69943378fed8366ca11:-1:42:0:1.5:free:420:2::");
         let r = parse_lookup_reply(b"8:1:192.0.2.9:unused:203.0.113.9:54000:5900:5901:TmFtZQ==:55100:unused:198.51.100.2:-1:123:relay.example:x:x:x:x:x:secret:direct-info:42").unwrap();
         assert_eq!(r.correlation, Some(42));

@@ -1,13 +1,15 @@
 //! Linux glue (MacScreenCapture.swift + MacHostInputController.swift): capture
-//! the X11 root window with GetImage and inject input with XTEST.
+//! the X11 root window with MIT-SHM (GetImage fallback) and inject input with
+//! XTEST. Capture and input use separate connections and threads.
 
-use super::encode::{Frame, Monitor};
-use super::session::Desktop;
+use super::backend::{Backend, Capturer, Injector};
+use super::layout::Rect;
 use crate::input::{self, InputEvent};
 use crate::wire::Result;
 use std::collections::HashMap;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::randr::ConnectionExt as _;
+use x11rb::protocol::shm::ConnectionExt as _;
 use x11rb::protocol::xproto::{self, ConnectionExt as _, ImageFormat, ImageOrder};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
@@ -104,7 +106,7 @@ pub fn vk_keysym(vk: u8, scan: u16) -> Option<u32> {
 }
 
 /// UTF-16 unit → keysym (Latin-1 direct, otherwise the Unicode keysym range).
-fn char_keysym(ch: u16) -> Option<u32> {
+pub fn char_keysym(ch: u16) -> Option<u32> {
     match ch {
         0x20..=0x7e | 0xa0..=0xff => Some(ch as u32),
         0xd800..=0xdfff | 0..=0x1f | 0x7f..=0x9f => None,
@@ -112,35 +114,82 @@ fn char_keysym(ch: u16) -> Option<u32> {
     }
 }
 
-pub struct X11Desktop {
-    conn: RustConnection,
-    root: xproto::Window,
-    width: u16,
-    height: u16,
-    format: PixelFormat,
-    min_keycode: u8,
-    keysyms_per_keycode: u8,
-    keycodes: HashMap<u32, u8>,
-    /// A keycode with no symbols, remapped to type VK_PACKET characters.
-    spare_keycode: Option<u8>,
-    pointer: Option<(i16, i16)>,
-    held_keys: Vec<u8>,
-    held_buttons: Vec<u8>,
-    wheel_remainder: i32,
+/// True when an X11 display is configured (DISPLAY set).
+pub fn available() -> bool {
+    std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
 }
 
-impl X11Desktop {
-    pub fn connect() -> Result<Self> {
-        if std::env::var_os("DISPLAY").is_none() {
-            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-                return Err("Wayland hosting is not supported yet; log in to an X11 session (e.g. \"GNOME on Xorg\").".into());
+fn open() -> Result<(RustConnection, usize)> {
+    if !available() {
+        return Err("No X11 display: set DISPLAY or run from a graphical X11 session.".into());
+    }
+    x11rb::connect(None).map_err(|e| format!("Cannot open the X11 display: {e}").into())
+}
+
+/// Capture and input on two X11 connections.
+pub fn backend() -> Result<Backend> {
+    let capturer = X11Capture::connect()?;
+    let injector = X11Input::connect()?;
+    let shm = if capturer.shm.is_some() { "MIT-SHM" } else { "GetImage" };
+    eprintln!("Sharing the X11 display with {shm} capture and XTEST input.");
+    Ok(Backend { name: "x11", capturer: Box::new(capturer), injector: Box::new(injector) })
+}
+
+/// A SysV shared memory segment attached to the X server.
+struct Shm {
+    seg: u32,
+    addr: *mut u8,
+    size: usize,
+}
+
+// The mapping is owned by this struct and only touched by its thread.
+unsafe impl Send for Shm {}
+
+impl Shm {
+    fn create(conn: &RustConnection, size: usize) -> Option<Shm> {
+        // Safety: plain SysV calls; the segment is marked for removal as soon
+        // as both sides are attached, so it never outlives the process.
+        unsafe {
+            let id = libc::shmget(libc::IPC_PRIVATE, size, libc::IPC_CREAT | 0o600);
+            if id < 0 {
+                return None;
             }
-            return Err("No X11 display: set DISPLAY or run from a graphical X11 session.".into());
+            let addr = libc::shmat(id, std::ptr::null(), libc::SHM_RDONLY);
+            let ok = addr as isize != -1;
+            let seg = conn.generate_id().ok();
+            let attached = ok && seg.is_some_and(|seg| {
+                conn.shm_attach(seg, id as u32, false).ok().is_some_and(|c| c.check().is_ok())
+            });
+            libc::shmctl(id, libc::IPC_RMID, std::ptr::null_mut());
+            if !attached {
+                if ok {
+                    libc::shmdt(addr);
+                }
+                return None;
+            }
+            Some(Shm { seg: seg.unwrap(), addr: addr as *mut u8, size })
         }
-        let (conn, screen_num) = x11rb::connect(None).map_err(|e| format!("Cannot open the X11 display: {e}"))?;
-        if conn.extension_information(x11rb::protocol::xtest::X11_EXTENSION_NAME)?.is_none() {
-            return Err("The X server has no XTEST extension; remote control is unavailable.".into());
-        }
+    }
+
+    fn release(&mut self, conn: &RustConnection) {
+        let _ = conn.shm_detach(self.seg);
+        let _ = conn.flush();
+        // Safety: addr came from shmat and is detached exactly once.
+        unsafe { libc::shmdt(self.addr as *const libc::c_void) };
+    }
+}
+
+pub struct X11Capture {
+    conn: RustConnection,
+    root: xproto::Window,
+    format: PixelFormat,
+    shm_supported: bool,
+    shm: Option<Shm>,
+}
+
+impl X11Capture {
+    pub fn connect() -> Result<Self> {
+        let (conn, screen_num) = open()?;
         let setup = conn.setup();
         let screen = &setup.roots[screen_num];
         let depth = screen.root_depth;
@@ -152,14 +201,136 @@ impl X11Desktop {
             msb_first: setup.image_byte_order == ImageOrder::MSB_FIRST,
             red_mask: visual.red_mask, green_mask: visual.green_mask, blue_mask: visual.blue_mask,
         };
-        let (root, width, height) = (screen.root, screen.width_in_pixels, screen.height_in_pixels);
+        let root = screen.root;
+        let shm_supported = std::env::var_os("LINUXVIEWER_NO_SHM").is_none()
+            && conn.extension_information(x11rb::protocol::shm::X11_EXTENSION_NAME)?.is_some();
+        // GetMonitors needs RandR 1.5, and servers answer by the version the
+        // client announced.
+        if conn.extension_information(x11rb::protocol::randr::X11_EXTENSION_NAME)?.is_some() {
+            let _ = conn.randr_query_version(1, 5)?.reply();
+        }
+        let mut capture = X11Capture { conn, root, format, shm_supported, shm: None };
+        if capture.shm_supported {
+            // Probe once so the startup message is accurate; remote X servers fail here.
+            let size = capture.format.stride(1) * 1;
+            capture.shm = Shm::create(&capture.conn, size.max(4096));
+            capture.shm_supported = capture.shm.is_some();
+        }
+        Ok(capture)
+    }
+
+    fn root_rect(&self) -> Result<Rect> {
+        let g = self.conn.get_geometry(self.root)?.reply()?;
+        Ok(Rect { x: 0, y: 0, width: g.width as i32, height: g.height as i32 })
+    }
+
+    fn capture_shm(&mut self, rect: Rect) -> Option<Vec<u8>> {
+        let size = self.format.stride(rect.width as usize) * rect.height as usize;
+        if self.shm.as_ref().is_none_or(|s| s.size < size) {
+            if let Some(mut old) = self.shm.take() {
+                old.release(&self.conn);
+            }
+            self.shm = Shm::create(&self.conn, size);
+        }
+        let shm = self.shm.as_ref()?;
+        let reply = self.conn.shm_get_image(self.root, rect.x as i16, rect.y as i16, rect.width as u16, rect.height as u16,
+                                            !0, ImageFormat::Z_PIXMAP.into(), shm.seg, 0).ok()?.reply().ok()?;
+        if (reply.size as usize) < size {
+            return None;
+        }
+        // Safety: the server finished writing before replying; size <= mapping.
+        let data = unsafe { std::slice::from_raw_parts(shm.addr, size) };
+        let mut out = Vec::with_capacity(rect.width as usize * rect.height as usize * 2);
+        zpixmap_to_rgb555(data, rect.width as usize, rect.height as usize, &self.format, &mut out).ok()?;
+        Some(out)
+    }
+
+    fn capture_get_image(&self, rect: Rect) -> Result<Vec<u8>> {
+        let (w, h) = (rect.width as usize, rect.height as usize);
+        let mut out = Vec::with_capacity(w * h * 2);
+        // Bottom strip first, so the result is bottom-up.
+        let mut bottom = rect.height;
+        while bottom > 0 {
+            let rows = bottom.min(STRIP_ROWS as i32);
+            let top = bottom - rows;
+            let reply = self.conn.get_image(ImageFormat::Z_PIXMAP, self.root, rect.x as i16, (rect.y + top) as i16,
+                                            rect.width as u16, rows as u16, !0)?
+                .reply().map_err(|e| format!("X11 screen capture failed: {e}"))?;
+            zpixmap_to_rgb555(&reply.data, w, rows as usize, &self.format, &mut out)?;
+            bottom = top;
+        }
+        Ok(out)
+    }
+}
+
+impl Drop for X11Capture {
+    fn drop(&mut self) {
+        if let Some(mut shm) = self.shm.take() {
+            shm.release(&self.conn);
+        }
+    }
+}
+
+impl Capturer for X11Capture {
+    fn displays(&mut self) -> Result<Vec<Rect>> {
+        let root = self.root_rect()?;
+        let monitors = self.conn.randr_get_monitors(self.root, true).ok().and_then(|c| c.reply().ok())
+            .map(|r| r.monitors).unwrap_or_default();
+        let mut list: Vec<(bool, Rect)> = monitors.iter().filter_map(|m| {
+            let (x, y) = (m.x as i32, m.y as i32);
+            let (r, b) = ((x + m.width as i32).min(root.width), (y + m.height as i32).min(root.height));
+            (x >= 0 && y >= 0 && r > x && b > y).then_some((m.primary, Rect { x, y, width: r - x, height: b - y }))
+        }).collect();
+        list.dedup_by(|a, b| a.1 == b.1);
+        // Primary first, then left to right, like MacSharingDisplay.current.
+        list.sort_by_key(|(primary, r)| (!primary, r.x, r.y));
+        if list.is_empty() {
+            return Ok(vec![root]);
+        }
+        Ok(list.into_iter().map(|(_, r)| r).collect())
+    }
+
+    fn capture(&mut self, rect: Rect) -> Result<Vec<u8>> {
+        if self.shm_supported {
+            if let Some(pixels) = self.capture_shm(rect) {
+                return Ok(pixels);
+            }
+            eprintln!("MIT-SHM capture failed; falling back to GetImage.");
+            self.shm_supported = false;
+        }
+        self.capture_get_image(rect)
+    }
+}
+
+pub struct X11Input {
+    conn: RustConnection,
+    root: xproto::Window,
+    min_keycode: u8,
+    keysyms_per_keycode: u8,
+    keycodes: HashMap<u32, u8>,
+    /// A keycode with no symbols, remapped to type VK_PACKET characters.
+    spare_keycode: Option<u8>,
+    pointer: Option<(i16, i16)>,
+    held_keys: Vec<u8>,
+    held_buttons: Vec<u8>,
+    wheel_remainder: i32,
+}
+
+impl X11Input {
+    pub fn connect() -> Result<Self> {
+        let (conn, screen_num) = open()?;
+        if conn.extension_information(x11rb::protocol::xtest::X11_EXTENSION_NAME)?.is_none() {
+            return Err("The X server has no XTEST extension; remote control is unavailable.".into());
+        }
+        let setup = conn.setup();
+        let root = setup.roots[screen_num].root;
         let (min_keycode, max_keycode) = (setup.min_keycode, setup.max_keycode);
-        let mut desktop = X11Desktop {
-            conn, root, width, height, format, min_keycode, keysyms_per_keycode: 0, keycodes: HashMap::new(),
-            spare_keycode: None, pointer: None, held_keys: Vec::new(), held_buttons: Vec::new(), wheel_remainder: 0,
+        let mut input = X11Input {
+            conn, root, min_keycode, keysyms_per_keycode: 0, keycodes: HashMap::new(), spare_keycode: None,
+            pointer: None, held_keys: Vec::new(), held_buttons: Vec::new(), wheel_remainder: 0,
         };
-        desktop.load_keymap(max_keycode)?;
-        Ok(desktop)
+        input.load_keymap(max_keycode)?;
+        Ok(input)
     }
 
     fn load_keymap(&mut self, max_keycode: u8) -> Result<()> {
@@ -180,19 +351,6 @@ impl X11Desktop {
             .find(|(_, syms)| syms.iter().all(|&s| s == 0))
             .map(|(i, _)| self.min_keycode + i as u8);
         Ok(())
-    }
-
-    fn monitors(&self) -> Vec<Monitor> {
-        let Ok(Ok(reply)) = self.conn.randr_get_monitors(self.root, true).map(|c| c.reply()) else { return Vec::new() };
-        if reply.monitors.len() < 2 {
-            return Vec::new();
-        }
-        let (w, h) = (self.width as i32, self.height as i32);
-        reply.monitors.iter().filter_map(|m| {
-            let (l, t) = (m.x as i32, m.y as i32);
-            let (r, b) = ((l + m.width as i32).min(w), (t + m.height as i32).min(h));
-            (l >= 0 && t >= 0 && r > l && b > t).then_some(Monitor { left: l, top: t, right: r, bottom: b })
-        }).collect()
     }
 
     fn fake(&self, kind: u8, detail: u8, x: i16, y: i16) -> Result<()> {
@@ -232,10 +390,7 @@ impl X11Desktop {
             // Right Alt is often AltGr.
             if let Some(code) = self.keycodes.get(&0xfe03) { return Some(*code); }
         }
-        // evdev: X keycode = Linux keycode + 8, and set-1 make codes match Linux
-        // keycodes for the main block.
-        let make = (scan & 0xff) as u8;
-        (scan & 0xff00 == 0 && (1..=0x58).contains(&make)).then_some(make + 8)
+        evdev_keycode(scan).map(|k| (k + 8) as u8)
     }
 
     /// VK_PACKET: type one character by remapping the spare keycode.
@@ -258,64 +413,34 @@ impl X11Desktop {
     }
 }
 
-impl Desktop for X11Desktop {
-    fn capture(&mut self) -> Result<Frame> {
-        let (w, h) = (self.width as usize, self.height as usize);
-        let mut out = Vec::with_capacity(w * h * 2);
-        // Bottom strip first, so the result is bottom-up.
-        let mut bottom = self.height;
-        while bottom > 0 {
-            let rows = bottom.min(STRIP_ROWS);
-            let top = bottom - rows;
-            let reply = self.conn.get_image(ImageFormat::Z_PIXMAP, self.root, 0, top as i16, self.width, rows, !0)?
-                .reply().map_err(|e| format!("X11 screen capture failed: {e}"))?;
-            zpixmap_to_rgb555(&reply.data, w, rows as usize, &self.format, &mut out)?;
-            bottom = top;
-        }
-        Ok(Frame { width: w, height: h, rgb555_bottom_up: out, monitors: self.monitors(), layout_id: None })
-    }
-
+impl Injector for X11Input {
     fn inject(&mut self, event: &InputEvent) -> Result<()> {
-        match *event {
-            InputEvent::Mouse { msg: input::WM_MOUSEMOVE, x, y, .. } => {
-                let x = x.clamp(0, self.width as i32 - 1) as i16;
-                let y = y.clamp(0, self.height as i32 - 1) as i16;
+        match pointer_action(event, &mut self.wheel_remainder) {
+            PointerAction::Move(x, y) => {
+                let (x, y) = (x.clamp(0, i16::MAX as i32) as i16, y.clamp(0, i16::MAX as i32) as i16);
                 self.pointer = Some((x, y));
                 self.fake(xproto::MOTION_NOTIFY_EVENT, 0, x, y)?;
             }
-            InputEvent::Mouse { msg: input::WM_MOUSEWHEEL, wheel, .. } => {
-                if self.pointer.is_none() { return Ok(()) }
-                self.wheel_remainder += wheel as i32;
-                let steps = self.wheel_remainder / 120;
-                self.wheel_remainder %= 120;
+            PointerAction::Button(b, pressed) => self.button(b, pressed)?,
+            PointerAction::Wheel(steps) => {
                 let button = if steps > 0 { 4 } else { 5 };
                 for _ in 0..steps.unsigned_abs() {
                     self.button(button, true)?;
                     self.button(button, false)?;
                 }
             }
-            // Button lParam is viewer-client coordinates: use the last move.
-            // A double-click message is the second press of a pair.
-            InputEvent::Mouse { msg, .. } => match msg {
-                0x201 | 0x203 => self.button(1, true)?,
-                0x202 => self.button(1, false)?,
-                0x204 | 0x206 => self.button(3, true)?,
-                0x205 => self.button(3, false)?,
-                0x207 | 0x209 => self.button(2, true)?,
-                0x208 => self.button(2, false)?,
-                _ => {}
-            },
-            InputEvent::Key { kind, vk, scan, ch } => {
-                let down = kind == input::KEY_DOWN || kind == input::SYS_KEY_DOWN;
-                if vk == input::VK_PACKET {
-                    if down { self.type_char(ch)?; }
-                } else if let Some(code) = self.keycode_for(vk, scan) {
-                    if down && self.held_keys.contains(&code) {
-                        // Autorepeat: X wants a press for each repeat.
-                        self.fake(xproto::KEY_PRESS_EVENT, code, 0, 0)?;
-                    } else {
-                        self.key(code, down)?;
-                    }
+            PointerAction::None => {}
+        }
+        if let InputEvent::Key { kind, vk, scan, ch } = *event {
+            let down = kind == input::KEY_DOWN || kind == input::SYS_KEY_DOWN;
+            if vk == input::VK_PACKET {
+                if down { self.type_char(ch)?; }
+            } else if let Some(code) = self.keycode_for(vk, scan) {
+                if down && self.held_keys.contains(&code) {
+                    // Autorepeat: X wants a press for each repeat.
+                    self.fake(xproto::KEY_PRESS_EVENT, code, 0, 0)?;
+                } else {
+                    self.key(code, down)?;
                 }
             }
         }
@@ -336,6 +461,56 @@ impl Desktop for X11Desktop {
         self.wheel_remainder = 0;
         let _ = self.conn.flush();
     }
+}
+
+/// Mouse events in X button numbers (1 left, 2 middle, 3 right).
+#[derive(Debug, PartialEq)]
+pub enum PointerAction {
+    Move(i32, i32),
+    Button(u8, bool),
+    /// Whole wheel notches, positive = away from the user.
+    Wheel(i32),
+    None,
+}
+
+/// Shared by the X11 and Wayland injectors. Button lParam is viewer-client
+/// coordinates, so buttons act at the last move; a double-click message is
+/// the second press of a pair.
+pub fn pointer_action(event: &InputEvent, wheel_remainder: &mut i32) -> PointerAction {
+    let InputEvent::Mouse { msg, x, y, wheel } = *event else { return PointerAction::None };
+    match msg {
+        input::WM_MOUSEMOVE => PointerAction::Move(x, y),
+        input::WM_MOUSEWHEEL => {
+            *wheel_remainder += wheel as i32;
+            let steps = *wheel_remainder / 120;
+            *wheel_remainder %= 120;
+            if steps == 0 { PointerAction::None } else { PointerAction::Wheel(steps) }
+        }
+        0x201 | 0x203 => PointerAction::Button(1, true),
+        0x202 => PointerAction::Button(1, false),
+        0x204 | 0x206 => PointerAction::Button(3, true),
+        0x205 => PointerAction::Button(3, false),
+        0x207 | 0x209 => PointerAction::Button(2, true),
+        0x208 => PointerAction::Button(2, false),
+        _ => PointerAction::None,
+    }
+}
+
+/// Linux evdev keycode for a set-1 scan code (main block and E0 keys).
+pub fn evdev_keycode(scan: u16) -> Option<u32> {
+    let make = (scan & 0xff) as u32;
+    if scan & 0xff00 == 0 {
+        return (1..=0x58).contains(&make).then_some(make);
+    }
+    if scan & 0xff00 != 0xe000 && scan & 0x0100 == 0 {
+        return None;
+    }
+    Some(match make {
+        0x1c => 96, 0x1d => 97, 0x35 => 98, 0x37 => 99, 0x38 => 100, 0x47 => 102, 0x48 => 103, 0x49 => 104,
+        0x4b => 105, 0x4d => 106, 0x4f => 107, 0x50 => 108, 0x51 => 109, 0x52 => 110, 0x53 => 111,
+        0x5b => 125, 0x5c => 126, 0x5d => 127,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -372,6 +547,15 @@ mod tests {
     }
 
     #[test]
+    fn converts_30_bit_deep_color() {
+        // Depth 30 (NVIDIA/AMD deep color): 10 bits per channel in 32-bit pixels.
+        let f30 = PixelFormat { red_mask: 0x3ff0_0000, green_mask: 0x000f_fc00, blue_mask: 0x0000_03ff, ..BGRX };
+        let mut out = Vec::new();
+        zpixmap_to_rgb555(&0x3ff0_0000u32.to_le_bytes(), 1, 1, &f30, &mut out).unwrap();
+        assert_eq!(out, 0x7c00u16.to_le_bytes());
+    }
+
+    #[test]
     fn maps_keys() {
         assert_eq!(vk_keysym(0x41, 0x1e), Some(0x61));
         assert_eq!(vk_keysym(0x0d, 0xe01c), Some(0xff8d));
@@ -382,15 +566,40 @@ mod tests {
         assert_eq!(char_keysym(0xd800), None);
     }
 
+    #[test]
+    fn pointer_actions_and_evdev() {
+        let mut rem = 0;
+        let ev = |msg, wheel| InputEvent::Mouse { msg, x: 3, y: 4, wheel };
+        assert_eq!(pointer_action(&ev(0x200, 0), &mut rem), PointerAction::Move(3, 4));
+        assert_eq!(pointer_action(&ev(0x203, 0), &mut rem), PointerAction::Button(1, true));
+        assert_eq!(pointer_action(&ev(0x20a, 60), &mut rem), PointerAction::None);
+        assert_eq!(pointer_action(&ev(0x20a, 60), &mut rem), PointerAction::Wheel(1));
+        assert_eq!(pointer_action(&ev(0x20a, -240), &mut rem), PointerAction::Wheel(-2));
+        assert_eq!((evdev_keycode(0x1e), evdev_keycode(0xe048), evdev_keycode(0xe0ff)), (Some(0x1e), Some(103), None));
+    }
+
     /// Needs an X server: `xvfb-run cargo test -- --ignored xvfb`.
     #[test]
     #[ignore]
     fn xvfb_capture_and_pointer() {
-        let mut d = X11Desktop::connect().unwrap();
-        let frame = d.capture().unwrap();
+        use super::super::backend::{capture_frame, Capturer};
+        use super::super::layout::Selection;
+        let mut c = X11Capture::connect().unwrap();
+        assert!(c.shm_supported, "MIT-SHM should work against a local Xvfb");
+        let (frame, _) = capture_frame(&mut c, Selection::All).unwrap();
         assert_eq!(frame.rgb555_bottom_up.len(), frame.width * frame.height * 2);
+        let shm = c.capture(Rect { x: 0, y: 0, width: 64, height: 32 }).unwrap();
+        c.shm_supported = false;
+        let plain = c.capture(Rect { x: 0, y: 0, width: 64, height: 32 }).unwrap();
+        assert_eq!(shm, plain);
         let payload = super::super::encode::full_frame(&frame, 1, super::super::encode::Compression::Zstandard).unwrap();
-        eprintln!("captured {}x{}, frame payload {} bytes", frame.width, frame.height, payload.len());
+        let first = u16::from_le_bytes([frame.rgb555_bottom_up[0], frame.rgb555_bottom_up[1]]);
+        eprintln!("captured {}x{}, frame payload {} bytes, first pixel {first:#06x}", frame.width, frame.height, payload.len());
+        if let Ok(want) = std::env::var("LV_EXPECT_PIXEL") {
+            assert_eq!(format!("{first:#06x}"), want);
+        }
+
+        let mut d = X11Input::connect().unwrap();
         d.inject(&InputEvent::Mouse { msg: input::WM_MOUSEMOVE, x: 37, y: 41, wheel: 0 }).unwrap();
         let p = d.conn.query_pointer(d.root).unwrap().reply().unwrap();
         assert_eq!((p.root_x, p.root_y), (37, 41));
@@ -399,5 +608,34 @@ mod tests {
         d.inject(&InputEvent::Key { kind: input::KEY_DOWN, vk: input::VK_PACKET, scan: 0, ch: 0x20ac }).unwrap();
         d.release_all();
         assert!(d.held_keys.is_empty() && d.held_buttons.is_empty());
+    }
+
+    /// Needs an X server whose RandR honors `xrandr --setmonitor` (Xorg with
+    /// the dummy driver does; Xvfb ignores it). Splits the root into two monitors.
+    #[test]
+    #[ignore]
+    fn xorg_monitor_selection() {
+        use super::super::backend::capture_frame;
+        use super::super::layout::Selection;
+        let mut c = X11Capture::connect().unwrap();
+        let root = c.root_rect().unwrap();
+        let half = root.width / 2;
+        let set = |name: &str, w: i32, x: i32| std::process::Command::new("xrandr")
+            .args(["--setmonitor", name, &format!("{w}/100x{}/100+{x}+0", root.height), "none"])
+            .status().is_ok_and(|s| s.success());
+        assert!(set("LV-A", half, 0) && set("LV-B", root.width - half, half), "xrandr --setmonitor failed");
+        let left = Rect { x: 0, y: 0, width: half, height: root.height };
+        let right = Rect { x: half, y: 0, width: root.width - half, height: root.height };
+        let displays = c.displays().unwrap();
+        eprintln!("displays: {displays:?}");
+        assert!(displays.contains(&left) && displays.contains(&right));
+        let (all, _) = capture_frame(&mut c, Selection::All).unwrap();
+        assert_eq!(all.monitors.len(), displays.len());
+        let n = displays.iter().position(|d| *d == right).unwrap() + 1;
+        let (one, layout) = capture_frame(&mut c, Selection::Display(n)).unwrap();
+        assert_eq!((one.width as i32, one.height as i32), (right.width, right.height));
+        assert!(one.monitors.is_empty());
+        assert_eq!(layout.to_source(0, 0), (half, 0));
+        super::super::encode::initialization(all.width, all.height, "6.6.133", 0, 0, &all.monitors).unwrap();
     }
 }

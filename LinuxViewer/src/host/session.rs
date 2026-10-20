@@ -1,20 +1,14 @@
 //! UltraViewerHostSession.swift: the host's viewer state machine. `Core` does
 //! no I/O; it returns `Action`s so the login, approval, pacing and input gates
-//! can be tested without a network. `run` wires it to the relays and desktop.
+//! can be tested without a network. runner.rs wires it to the relays and desktop.
 
 use super::encode::{self, Compression, Frame, FIRST_FRAME_NUMBER};
-use super::login::{self, LoginRequest, RelayAddress, RelayRequest, Throttle};
+use super::login::{LoginRequest, Throttle};
 use crate::input::{self, InputEvent};
-use crate::messages::{version_at_least, Registration};
-use crate::tls::{self, FrameWriter};
-use crate::command::CommandConnection;
-use crate::wire::{self, encode_multipart, Envelope, Ipv4, Result};
-use std::io::BufRead;
-use std::sync::mpsc;
-use std::thread;
+use crate::messages::version_at_least;
+use crate::wire::{encode_multipart, Ipv4, Result};
 use std::time::{Duration, Instant};
 
-const RELAY_PORT: u16 = 443;
 const HOST_VERSION: &str = "6.6.133";
 
 /// Delay between a viewer frame acknowledgment and the next capture. The ack
@@ -46,14 +40,6 @@ pub fn resets_sequence(r: Reinit) -> bool {
     !matches!(r, Reinit::DisplayLayoutChange)
 }
 
-/// What the platform must provide: a full-screen capture and input injection.
-pub trait Desktop {
-    fn capture(&mut self) -> Result<Frame>;
-    fn inject(&mut self, event: &InputEvent) -> Result<()>;
-    /// Release held keys/buttons (disconnect, control revoked).
-    fn release_all(&mut self);
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Route {
     pub address: Ipv4,
@@ -74,6 +60,10 @@ pub enum Action {
     Prompt(Request),
     Connected(Request),
     Input(InputEvent),
+    /// A non-screen payload from the connected viewer (chat, clipboard, files);
+    /// only produced after the viewer finished initializing, as in
+    /// HostedSessionToolsGate.
+    Tool(Vec<u8>),
     ReleaseInput,
     Ended(String),
 }
@@ -98,6 +88,9 @@ pub struct Core {
     throttle: Throttle,
     peer: Option<Peer>,
     phase: Phase,
+    /// HostedSessionToolsGate: chat/clipboard/files only after the first "17";
+    /// a reinitialization of the same viewer keeps them.
+    tools_connected: bool,
     control: bool,
     pending_frame: Option<Frame>,
     last_frame: Option<Frame>,
@@ -127,7 +120,7 @@ fn peer_tag(p: &[u8]) -> &[u8] {
 impl Core {
     pub fn new(password: &str, custom_proof: Option<String>) -> Self {
         Core {
-            password: password.into(), custom_proof, throttle: Throttle::default(), peer: None, phase: Phase::None,
+            password: password.into(), custom_proof, throttle: Throttle::default(), peer: None, phase: Phase::None, tools_connected: false,
             control: false, pending_frame: None, last_frame: None, next_seq: FIRST_FRAME_NUMBER, waiting_ack: false,
             capture_at: None, deadline: None, pacing: Pacing::STANDARD, frames_sent: 0, out: Vec::new(),
         }
@@ -137,6 +130,11 @@ impl Core {
     pub fn has_viewer(&self) -> bool { self.peer.is_some() }
     pub fn streaming(&self) -> bool { self.phase == Phase::Streaming }
     pub fn control_allowed(&self) -> bool { self.control }
+
+    /// Route of the viewer that may use chat/clipboard/files.
+    pub fn tools_route(&self) -> Option<Route> {
+        self.peer.as_ref().filter(|_| self.tools_connected && self.phase != Phase::Approval).map(|p| p.route)
+    }
 
     /// The earliest moment `tick` or a capture may have work to do.
     pub fn next_wake(&self) -> Option<Instant> {
@@ -155,6 +153,7 @@ impl Core {
         if payload == b"17" && self.phase == Phase::Starting {
             self.deadline = None;
             self.phase = Phase::Streaming;
+            self.tools_connected = true;
             self.out.push(Action::Connected(peer.request.clone()));
             if let Some(frame) = self.pending_frame.take() {
                 self.send_frame(frame, now)?;
@@ -172,14 +171,15 @@ impl Core {
             b"32" if payload == b"32|||1" => {
                 self.end_viewer("The Windows viewer requested an unsupported screen color mode. Use 16-bit color.")
             }
-            _ if self.phase == Phase::Streaming && self.control
-                && (payload.starts_with(b"8|||") || payload.starts_with(&[30, 124, 124, 124])) => {
-                if payload.len() <= 4096 {
+            _ if payload.starts_with(b"8|||") || payload.starts_with(&[30, 124, 124, 124]) => {
+                if self.phase == Phase::Streaming && self.control && payload.len() <= 4096 {
                     if let Some(ev) = input::decode(payload) {
                         self.out.push(Action::Input(ev));
                     }
                 }
             }
+            b"17" | b"18" | b"32" => {}
+            _ if self.tools_connected => self.out.push(Action::Tool(payload.to_vec())),
             _ => {}
         }
         Ok(())
@@ -332,6 +332,7 @@ impl Core {
     pub fn end_viewer(&mut self, reason: &str) {
         let old = self.peer.take();
         self.phase = Phase::None;
+        self.tools_connected = false;
         self.control = false;
         self.waiting_ack = false;
         self.capture_at = None;
@@ -348,242 +349,6 @@ impl Core {
     fn status(&mut self, s: &str) {
         self.out.push(Action::Status(s.into()));
     }
-}
-
-// --- I/O ---
-
-enum Event {
-    Command(Vec<u8>),
-    CommandClosed(String),
-    Relay(u64, Vec<u8>),
-    RelayClosed(u64, String),
-    Line(String),
-    StdinClosed,
-}
-
-fn system_tag(p: &[u8]) -> &[u8] {
-    let tag = p.split(|&b| b == b':').next().unwrap_or(&[]);
-    if !tag.is_empty() && tag.len() <= 3 && tag.iter().all(u8::is_ascii_digit) { tag } else { b"other" }
-}
-
-fn spawn_reader(mut reader: tls::FrameReader, tx: mpsc::Sender<Event>, wrap: impl Fn(Vec<u8>) -> Event + Send + 'static,
-                closed: impl FnOnce(String) -> Event + Send + 'static) {
-    thread::spawn(move || loop {
-        match reader.recv() {
-            Ok(frame) => {
-                if tx.send(wrap(frame)).is_err() {
-                    return;
-                }
-            }
-            Err(e) => {
-                let _ = tx.send(closed(e.to_string()));
-                return;
-            }
-        }
-    });
-}
-
-struct Relay {
-    generation: u64,
-    request: RelayRequest,
-    writer: Option<FrameWriter>,
-    address: Option<RelayAddress>,
-    address_deadline: Option<Instant>,
-}
-
-/// Register, print the ID and password, and serve viewers until stdin closes
-/// or the command channel drops.
-pub fn run(registration: &Registration, master_proof: Option<String>, desktop: &mut dyn Desktop) -> Result<()> {
-    let (tx, rx) = mpsc::channel::<Event>();
-    eprintln!("Getting this computer's UltraViewer ID…");
-    let mut connection = CommandConnection::register(registration)?;
-    let reply = connection.registration().clone();
-    let command = connection.sender();
-    {
-        let tx = tx.clone();
-        thread::spawn(move || loop {
-            match connection.recv() {
-                Ok(p) => if tx.send(Event::Command(p)).is_err() { return },
-                Err(e) => { let _ = tx.send(Event::CommandClosed(e.to_string())); return }
-            }
-        });
-    }
-    let send_command = |text: &str| command.send(text.as_bytes());
-    let lists = (reply.ping_list().to_string(), reply.ping_host_name_list().to_string());
-    println!("UltraViewer ID: {}", reply.id);
-    println!("Password:       {}", registration.password);
-    println!("Waiting for a Windows UltraViewer to connect. Ctrl-C to stop.");
-
-    {
-        let tx = tx.clone();
-        thread::spawn(move || {
-            for line in std::io::stdin().lock().lines() {
-                match line {
-                    Ok(l) => if tx.send(Event::Line(l)).is_err() { return },
-                    Err(_) => break,
-                }
-            }
-            let _ = tx.send(Event::StdinClosed);
-        });
-    }
-
-    let mut core = Core::new(&registration.password, master_proof);
-    let mut relay: Option<Relay> = None;
-    let mut relay_generation = 0u64;
-    let mut next_keepalive = Instant::now() + Duration::from_secs(60);
-
-    loop {
-        let now = Instant::now();
-        let mut wake = next_keepalive;
-        for t in [core.next_wake(), relay.as_ref().and_then(|r| r.address_deadline)].into_iter().flatten() {
-            wake = wake.min(t);
-        }
-        let event = match rx.recv_timeout(wake.saturating_duration_since(now)) {
-            Ok(ev) => Some(ev),
-            Err(mpsc::RecvTimeoutError::Timeout) => None,
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Err("host event channel closed".into()),
-        };
-        let now = Instant::now();
-        match event {
-            Some(Event::Command(payload)) => {
-                let payload = payload.as_slice();
-                let tag = system_tag(payload);
-                if tag == b"11" || tag == b"17" {
-                    let Some(request) = login::relay_request(payload, &lists.0, &lists.1) else {
-                        eprintln!("Ignored a malformed relay request.");
-                        continue;
-                    };
-                    if let Some(r) = relay.as_ref().filter(|r| r.request == request && r.address.is_some()) {
-                        send_command(&login::availability(&r.request, r.address.unwrap()))?;
-                    } else if !core.has_viewer() {
-                        if let Some(old) = relay.take() {
-                            if let Some(w) = old.writer { w.shutdown(); }
-                        }
-                        relay_generation += 1;
-                        eprintln!("Preparing the incoming Windows connection…");
-                        relay = Some(open_relay(&request, relay_generation, &tx));
-                    }
-                }
-            }
-            Some(Event::CommandClosed(e)) => return Err(format!("The UltraViewer command channel closed: {e}").into()),
-            Some(Event::Relay(generation, bytes)) => {
-                let Some(r) = relay.as_mut().filter(|r| r.generation == generation) else { continue };
-                match wire::decode_envelope(&bytes) {
-                    Ok(Envelope::System(p)) if p.starts_with(b"0:") => {
-                        if let Some(address) = login::relay_address(p) {
-                            r.address = Some(address);
-                            r.address_deadline = None;
-                            send_command(&login::availability(&r.request, address))?;
-                            eprintln!("Waiting for the Windows computer's login…");
-                        }
-                    }
-                    Ok(Envelope::Forward { ip, port, payload }) => {
-                        let unicode = bytes[1] != 0;
-                        if let Some(decoded) = login::peer_payload(payload, unicode) {
-                            core.on_peer(&decoded, Route { address: ip, port }, now)?;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Some(Event::RelayClosed(generation, e)) => {
-                if relay.as_ref().is_some_and(|r| r.generation == generation) {
-                    relay = None;
-                    core.end_viewer(&format!("The incoming relay disconnected: {e}"));
-                }
-            }
-            Some(Event::Line(line)) => {
-                let answer = line.trim().to_ascii_lowercase();
-                if core.awaiting_approval() {
-                    match answer.as_str() {
-                        "y" | "yes" | "v" => {
-                            let control = answer != "v";
-                            match desktop.capture() {
-                                Ok(frame) => core.approve(frame, control, now)?,
-                                Err(e) => core.end_viewer(&format!("Screen capture failed: {e}")),
-                            }
-                        }
-                        "n" | "no" => core.decline(),
-                        _ => eprintln!("Answer y (allow control), v (view only) or n (refuse)."),
-                    }
-                } else if core.has_viewer() {
-                    match answer.as_str() {
-                        "c" => core.set_control_allowed(!core.control_allowed()),
-                        "x" | "q" => core.end_viewer("You ended the incoming session."),
-                        _ => eprintln!("Commands: c = toggle control, x = end the session."),
-                    }
-                }
-            }
-            Some(Event::StdinClosed) => {}
-            None => {}
-        }
-
-        if relay.as_ref().is_some_and(|r| r.address_deadline.is_some_and(|t| t <= now)) {
-            if let Some(w) = relay.take().and_then(|r| r.writer) { w.shutdown(); }
-            core.end_viewer("The incoming relay did not provide an address. Ask Windows to connect again.");
-        }
-        if now >= next_keepalive {
-            next_keepalive = now + Duration::from_secs(60);
-            command.keepalive()?;
-            if let Some(w) = relay.as_ref().and_then(|r| r.writer.as_ref()) {
-                let _ = w.send(&wire::relay_keepalive_envelope());
-            }
-        }
-        core.tick(now);
-        if core.take_capture_due(now) {
-            match desktop.capture() {
-                Ok(frame) => core.submit_frame(frame, Instant::now())?,
-                Err(e) => core.end_viewer(&format!("Screen capture failed: {e}")),
-            }
-        }
-
-        for action in std::mem::take(&mut core.out) {
-            match action {
-                Action::Peer(route, bytes) => {
-                    if let Some(w) = relay.as_ref().and_then(|r| r.writer.as_ref()) {
-                        if let Err(e) = w.send(&wire::forward_envelope(route.address, route.port, false, &bytes)) {
-                            eprintln!("Relay send failed: {e}");
-                        }
-                    }
-                }
-                Action::Status(s) => eprintln!("{s}"),
-                Action::Prompt(r) => {
-                    let name = r.display_name.as_deref().unwrap_or("Unknown");
-                    println!("\nIncoming connection from {name} (claims ID {}).", r.viewer_id);
-                    println!("Allow? [y] view and control / [v] view only / [n] refuse (45 s):");
-                }
-                Action::Connected(r) => {
-                    println!("Connected to {}. Type c + Enter to toggle control, x + Enter to end.", r.viewer_id);
-                }
-                Action::Input(ev) => {
-                    if let Err(e) = desktop.inject(&ev) {
-                        eprintln!("Input injection failed: {e}");
-                    }
-                }
-                Action::ReleaseInput => desktop.release_all(),
-                Action::Ended(reason) => println!("Session ended: {reason}"),
-            }
-        }
-    }
-}
-
-fn open_relay(request: &RelayRequest, generation: u64, tx: &mpsc::Sender<Event>) -> Relay {
-    let mut relay = Relay { generation, request: request.clone(), writer: None, address: None,
-                            address_deadline: Some(Instant::now() + Duration::from_secs(15)) };
-    match tls::open(&request.address.to_string(), RELAY_PORT, &request.hostname) {
-        Ok((reader, writer)) => {
-            spawn_reader(reader, tx.clone(), move |f| Event::Relay(generation, f),
-                         move |e| Event::RelayClosed(generation, e));
-            if let Err(e) = writer.send(&wire::system_envelope(b"0", false)) {
-                let _ = tx.send(Event::RelayClosed(generation, e.to_string()));
-            }
-            relay.writer = Some(writer);
-        }
-        Err(e) => {
-            let _ = tx.send(Event::RelayClosed(generation, e.to_string()));
-        }
-    }
-    relay
 }
 
 #[cfg(test)]
