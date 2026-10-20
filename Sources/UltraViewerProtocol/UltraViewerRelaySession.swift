@@ -149,6 +149,10 @@ public actor UltraViewerRelaySession {
     private var events: AsyncThrowingStream<Event, any Swift.Error>.Continuation?
     private var latestFrame = LatestScreenFrame()
     private var renderer: ModernScreenRenderer?
+    /// Screen dictionary used to build the current renderer. Frame main pixels
+    /// are decompressed off the actor, so that detached call needs the same
+    /// dictionary to stay byte-identical to the inline renderer path.
+    private var screenDictionary: Data?
     private var registrationReply: ClientRegistration.Reply?
     private var peerInfo: PeerLookup.PeerInfo?
     private var targetAddress: RelayIPv4Address?
@@ -206,6 +210,7 @@ public actor UltraViewerRelaySession {
         self.heartbeatTicks = 0
         self.stallTask?.cancel(); self.stallTask = nil; self.stall = nil
         self.stallRecovering = false
+        self.screenDictionary = nil
         self.capturedCommands = []
         let token = UUID()
         generation = token
@@ -756,10 +761,12 @@ public actor UltraViewerRelaySession {
             let version = initialization.targetVersionBytes.map { String(decoding: $0, as: UTF8.self) } ?? ""
             guard Self.version(version, atLeast: [6, 0, 0]) else { throw Failure.unsupportedVersion }
             if geometryChanged {
+                let dictionary = try UltraViewerScreenDictionary.load()
+                screenDictionary = dictionary
                 let fresh = try ModernScreenRenderer(width: initialization.width, height: initialization.height,
                     tileSize: initialization.tileSize, displayColors: 2,
                     lastFrameNumber: upgradingID == nil ? (renderer?.lastFrameNumber ?? ModernScreenRenderer.resetFrameNumber) : ModernScreenRenderer.resetFrameNumber,
-                    dictionary: UltraViewerScreenDictionary.load())
+                    dictionary: dictionary)
                 if let upgradingID {
                     guard directState.selectInitialized(upgradingID) else { return }
                     diagnostics.lanDirectActive = true
@@ -816,11 +823,27 @@ public actor UltraViewerRelaySession {
             try await sendToPeer(Data("17".utf8))
             try await applyFileUpdate(FileTransferEngine.Update())
         case 1:
-            guard phase == .active, let renderer else { return }
+            guard phase == .active, let decodingRenderer = renderer else { return }
             diagnostics.screenPayloadBytes += UInt64(payload.count)
             let decodingStarted = DispatchTime.now().uptimeNanoseconds
             do {
-                let bitmap = try renderer.apply(ModernScreenFrameMessage.decode(parts: parts))
+                // Cheap parsing stays on the actor; the zstd expansion (up to the
+                // configured decompressed budget) runs off-actor so input sends
+                // and lifecycle events are not queued behind it. The peer loop
+                // awaits this call, so at most one frame is in flight.
+                let message = try ModernScreenFrameMessage.decode(parts: parts)
+                let limits = decodingRenderer.limits
+                let dictionary = screenDictionary
+                let rawPixels = try await Task.detached(priority: .userInitiated) {
+                    try ModernScreenRenderer.decompressMainPixels(message, limits: limits,
+                                                                 dictionary: dictionary)
+                }.value
+                // A refresh/re-init may have replaced the renderer or advanced
+                // the session while decompression ran. Never apply stale pixels
+                // and do not acknowledge the abandoned frame.
+                guard token == generation, phase == .active,
+                      let renderer, renderer === decodingRenderer else { return }
+                let bitmap = try renderer.apply(message, rawPixels: rawPixels)
                 let elapsed = DispatchTime.now().uptimeNanoseconds - decodingStarted
                 diagnostics.decodeNanoseconds += elapsed
                 diagnostics.maximumDecodeNanoseconds = max(diagnostics.maximumDecodeNanoseconds, elapsed)
@@ -1047,7 +1070,7 @@ public actor UltraViewerRelaySession {
         clipboardAllowed = false
         audioEnabled = false; audioDecoder = nil
         relayPingStarted = nil; peerPingStarted = nil
-        renderer = nil; configuration = nil; peerInfo = nil; registrationReply = nil
+        renderer = nil; screenDictionary = nil; configuration = nil; peerInfo = nil; registrationReply = nil
         targetAddress = nil; targetPort = nil
         let output = events; events = nil
         if let error { output?.finish(throwing: error) } else { output?.finish() }
