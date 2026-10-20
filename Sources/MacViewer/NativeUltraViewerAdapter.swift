@@ -63,7 +63,8 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                         }
                         pair.continuation.yield(.connected(RemoteSessionInfo(partnerID: partnerID,
                             displayName: info.displayName, allowsRemoteInput: info.allowsRemoteInput,
-                            monitors: info.monitors, virtualLeft: info.virtualLeft, virtualTop: info.virtualTop)))
+                            monitors: info.monitors, virtualLeft: info.virtualLeft, virtualTop: info.virtualTop,
+                            keyboardSupported: info.supportsBinaryKeyboard)))
                     case let .frame(latest):
                         guard let image = latest.take()?.makeCGImage() else { continue }
                         pair.continuation.yield(.frame(RemoteScreenFrame(image: image)))
@@ -72,7 +73,8 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                         self.allowsInput = info.allowsRemoteInput
                         pair.continuation.yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: partnerID,
                             displayName: info.displayName, allowsRemoteInput: info.allowsRemoteInput,
-                            monitors: info.monitors, virtualLeft: info.virtualLeft, virtualTop: info.virtualTop)))
+                            monitors: info.monitors, virtualLeft: info.virtualLeft, virtualTop: info.virtualTop,
+                            keyboardSupported: info.supportsBinaryKeyboard)))
                         pair.continuation.yield(.inputPermissionChanged(info.allowsRemoteInput))
                     case let .chat(text): pair.continuation.yield(.chat(text))
                     case let .fileOffer(offer):
@@ -116,6 +118,10 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                                        y: min(max(0, y), peer.height - 1) + Int(peer.virtualTop))
         case let .pointerButton(button, pressed, x, y):
             translated = .pointerButton(button: button, pressed: pressed,
+                x: min(max(0, x), peer.width - 1) + Int(peer.virtualLeft),
+                y: min(max(0, y), peer.height - 1) + Int(peer.virtualTop))
+        case let .doubleClick(button, x, y):
+            translated = .doubleClick(button: button,
                 x: min(max(0, x), peer.width - 1) + Int(peer.virtualLeft),
                 y: min(max(0, y), peer.height - 1) + Int(peer.virtualTop))
         default: translated = input

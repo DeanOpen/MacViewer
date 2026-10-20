@@ -106,6 +106,7 @@
 "All monitors" = "Tất cả màn hình";
 "Monitor %ld does not fit the received desktop image, so all monitors are shown. Refresh the screen or reconnect, or select All monitors." = "Màn hình %ld không khớp với hình desktop nhận được nên đang hiển thị tất cả màn hình. Hãy làm mới màn hình hoặc kết nối lại, hoặc chọn Tất cả màn hình.";
 "The remote desktop is larger than this viewer supports. Select a single monitor in UltraViewer on the Windows computer or lower the desktop resolution, then reconnect." = "Desktop từ xa lớn hơn mức trình xem này hỗ trợ. Hãy chọn một màn hình trong UltraViewer trên máy Windows hoặc giảm độ phân giải desktop rồi kết nối lại.";
+"Keyboard input is unavailable with this Windows UltraViewer version. Mouse and clipboard still work; update UltraViewer on the Windows computer to type." = "Phiên bản UltraViewer trên máy Windows không hỗ trợ gõ phím. Chuột và clipboard vẫn hoạt động; hãy cập nhật UltraViewer trên máy Windows để gõ phím.";
 "Display size" = "Kích thước hiển thị";
 "Fit to window" = "Vừa cửa sổ";
 "Actual size (100%)" = "Kích thước thực (100%)";
@@ -211,6 +212,7 @@
 "Enable Screen Recording and Accessibility before allowing Windows to control this Mac." = "Bật quyền Ghi màn hình và Trợ năng trước khi cho phép máy khác điều khiển máy Mac.";
 "Remote control paused. Check Accessibility permission." = "Đã tạm dừng điều khiển. Hãy kiểm tra quyền Trợ năng.";
 "Remote control is paused because a required macOS permission is unavailable." = "Đã tạm dừng điều khiển do thiếu quyền cần thiết trên macOS.";
+"Remote control is paused while the display changes." = "Đã tạm dừng điều khiển trong khi màn hình thay đổi.";
 "The UltraViewer relay did not respond. Check the connection and try again." = "Máy chủ chuyển tiếp UltraViewer không phản hồi. Kiểm tra kết nối rồi thử lại.";
 "The UltraViewer relay assigned to this session (%@) has an invalid security certificate: %@. Try again later." = "Máy chủ chuyển tiếp UltraViewer được chỉ định cho phiên này (%@) có chứng chỉ bảo mật không hợp lệ: %@. Vui lòng thử lại sau.";
 "Incoming" = "Kết nối đến";

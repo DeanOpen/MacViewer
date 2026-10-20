@@ -128,4 +128,40 @@ struct SessionToolsModelTests {
         #expect(!model.isSending)
         model.deactivate()
     }
+
+    @Test("A clipboard send failure stays retryable until the next poll succeeds")
+    func clipboardSendFailureRetries() async throws {
+        struct SendFailure: Error {}
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let suite = "SessionToolsModelTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: SessionToolsModel.shareClipboardKey)
+        let model = SessionToolsModel(pasteboard: board, defaults: defaults)
+        var attempts = 0
+        var sent: [String] = []
+        model.activate(sendChat: { _ in }, sendClipboard: { text in
+            attempts += 1
+            if attempts == 1 { throw SendFailure() }
+            sent.append(text)
+        }, setSharing: { _ in })
+        model.setClipboardEnabled(true)
+        for _ in 0..<100 where !model.clipboardEnabled { await Task.yield() }
+        #expect(model.clipboardEnabled)
+
+        board.clearContents(); board.setString("retry fixture", forType: .string)
+        await model.pollClipboardOnce()
+        #expect(attempts == 1)
+        #expect(sent.isEmpty)
+        #expect(model.errorMessage == "Clipboard text could not be sent.")
+
+        // The failed text is not treated as already sent: the next poll retries
+        // it even though the pasteboard did not change again.
+        await model.pollClipboardOnce()
+        #expect(attempts == 2)
+        #expect(sent == ["retry fixture"])
+        #expect(model.clipboardHistory.count == 1)
+        model.deactivate()
+    }
 }

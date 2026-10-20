@@ -106,6 +106,7 @@
 "All monitors" = "All monitors";
 "Monitor %ld does not fit the received desktop image, so all monitors are shown. Refresh the screen or reconnect, or select All monitors." = "Monitor %ld does not fit the received desktop image, so all monitors are shown. Refresh the screen or reconnect, or select All monitors.";
 "The remote desktop is larger than this viewer supports. Select a single monitor in UltraViewer on the Windows computer or lower the desktop resolution, then reconnect." = "The remote desktop is larger than this viewer supports. Select a single monitor in UltraViewer on the Windows computer or lower the desktop resolution, then reconnect.";
+"Keyboard input is unavailable with this Windows UltraViewer version. Mouse and clipboard still work; update UltraViewer on the Windows computer to type." = "Keyboard input is unavailable with this Windows UltraViewer version. Mouse and clipboard still work; update UltraViewer on the Windows computer to type.";
 "Display size" = "Display size";
 "Fit to window" = "Fit to window";
 "Actual size (100%)" = "Actual size (100%)";
@@ -211,6 +212,7 @@
 "Enable Screen Recording and Accessibility before allowing Windows to control this Mac." = "Enable Screen Recording and Accessibility before allowing another computer to control this Mac.";
 "Remote control paused. Check Accessibility permission." = "Remote control paused. Check Accessibility permission.";
 "Remote control is paused because a required macOS permission is unavailable." = "Remote control is paused because a required macOS permission is unavailable.";
+"Remote control is paused while the display changes." = "Remote control is paused while the display changes.";
 "The UltraViewer relay did not respond. Check the connection and try again." = "The UltraViewer relay did not respond. Check the connection and try again.";
 "The UltraViewer relay assigned to this session (%@) has an invalid security certificate: %@. Try again later." = "The UltraViewer relay assigned to this session (%@) has an invalid security certificate: %@. Try again later.";
 "Incoming" = "Incoming";

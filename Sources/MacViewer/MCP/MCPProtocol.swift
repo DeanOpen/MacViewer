@@ -5,6 +5,9 @@ struct MCPClientInfo: Equatable, Sendable {
     var version: String?
     /// The agent's executable, found from the connection rather than reported by the agent.
     var program: String? = nil
+    /// One token per socket connection, so per-client state (e.g. screenshot
+    /// scale) never leaks between two clients of the same trusted program.
+    var sessionToken: UUID = UUID()
 
     static let unknown = MCPClientInfo(name: "AI agent", version: nil)
 
@@ -59,7 +62,7 @@ final class MCPSession {
         case "initialize":
             if let info = params["clientInfo"], let name = info["name"]?.stringValue, !name.isEmpty {
                 client = MCPClientInfo(name: info["title"]?.stringValue ?? name, version: info["version"]?.stringValue,
-                                       program: client.program)
+                                       program: client.program, sessionToken: client.sessionToken)
             }
             let requested = params["protocolVersion"]?.stringValue ?? ""
             let version = Self.supportedProtocolVersions.contains(requested) ? requested : Self.supportedProtocolVersions[0]
@@ -105,7 +108,7 @@ enum MCPTools {
     user opened in the MacViewer app on this Mac. Typical loop: session_status → screenshot → click/type_text/press_keys \
     → screenshot to check the result. Mouse coordinates are pixels in the most recent screenshot image. \
     Input only works while the user has Control switched on in the session window; if it is off, ask the user to turn it on. \
-    The ⌘/win key name sends the Windows key.
+    The ⌘/win key name sends the Windows key. Tools are refused while the user has Stopped AI agents for the session,     or when the permission the tool needs is turned off.
     """
 
     static var names: Set<String> { Set(definitions.compactMap { $0["name"]?.stringValue }) }
@@ -159,7 +162,7 @@ enum MCPTools {
              properties: [("max_width", integer("Scale the image down to at most this width. Default 1280.", minimum: 320))],
              readOnly: true),
         tool("select_monitor", "Select monitor",
-             "Shows one remote monitor (see session_status), or 0 for all monitors.",
+             "Shows one remote monitor (see session_status), or 0 for all monitors. Requires the view-screen permission.",
              properties: [("index", integer("Monitor index.", minimum: 0))], required: ["index"]),
         tool("click", "Click",
              "Clicks at a point in the latest screenshot.",
@@ -175,7 +178,7 @@ enum MCPTools {
                           ("to_x", integer("End X.")), ("to_y", integer("End Y.")),
                           ("button", string("Mouse button. Default left.", values: ["left", "right", "middle"]))],
              required: ["from_x", "from_y", "to_x", "to_y"]),
-        tool("scroll", "Scroll", "Scrolls vertically with the mouse wheel, optionally after moving the pointer.",
+        tool("scroll", "Scroll", "Scrolls vertically with the mouse wheel, optionally after moving the pointer. Without x/y it scrolls under the remote pointer.",
              properties: [("direction", string("Scroll direction.", values: ["up", "down"])),
                           ("amount", integer("Wheel steps. Default 3.", minimum: 1)),
                           ("x", integer("Optional X to scroll at.")), ("y", integer("Optional Y to scroll at."))],
@@ -191,14 +194,14 @@ enum MCPTools {
         tool("remote_action", "Remote action", "Sends Ctrl-Alt-Delete or locks the remote screen.",
              properties: [("action", string("The action.", values: ["ctrl_alt_delete", "lock_screen"]))],
              required: ["action"]),
-        tool("send_chat", "Send chat message", "Sends a chat message to the person at the remote computer.",
+        tool("send_chat", "Send chat message", "Sends a chat message to the person at the remote computer. Requires the view-screen permission.",
              properties: [("text", string("Message."))], required: ["text"]),
-        tool("read_chat", "Read chat", "Returns recent chat messages from this session.",
+        tool("read_chat", "Read chat", "Returns recent chat messages from this session. Requires the view-screen permission.",
              properties: [("limit", integer("Number of messages. Default 20.", minimum: 1))], readOnly: true),
         tool("set_clipboard", "Set remote clipboard",
-             "Puts text on the shared clipboard so it can be pasted on the remote computer (clipboard sharing must be on).",
+             "Puts text on the shared clipboard so it can be pasted on the remote computer (clipboard sharing must be on). Requires the control permission.",
              properties: [("text", string("Text to share."))], required: ["text"]),
         tool("get_clipboard", "Get remote clipboard",
-             "Returns the latest text copied on the remote computer during this session.", readOnly: true),
+             "Returns the latest text copied on the remote computer during this session. Requires the view-screen permission.", readOnly: true),
     ]
 }

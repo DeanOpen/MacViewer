@@ -61,6 +61,8 @@ struct RemoteSessionInfo {
     var monitors: [RemoteMonitor] = []
     var virtualLeft: Int32 = 0
     var virtualTop: Int32 = 0
+    /// False when the peer's version predates the binary keyboard message form.
+    var keyboardSupported = true
 }
 
 struct RemoteScreenFrame {
@@ -102,6 +104,9 @@ enum RemoteInput: Sendable, Equatable {
     /// Coordinates are integer pixels in the most recently displayed remote frame.
     case pointerMoved(x: Int, y: Int)
     case pointerButton(button: Int, pressed: Bool, x: Int, y: Int)
+    /// A complete double-click press/release at a point. The wire carries the
+    /// dedicated 0x203/0x206/0x209 message; the peer synthesises the pair.
+    case doubleClick(button: Int, x: Int, y: Int)
     case scroll(deltaX: Double, deltaY: Double)
     /// `keyCode` is the macOS hardware code; the adapter translates it for the peer.
     case key(keyCode: UInt16, characters: String?, pressed: Bool, modifiers: RemoteModifiers)

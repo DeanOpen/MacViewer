@@ -177,6 +177,9 @@ Tools: `session_status`, `screenshot`, `click`, `move_mouse`, `drag`, `scroll`,
   the app over a local socket that only your user account can open.
 - Agents can use the mouse and keyboard only while **Control** is on. Starting or
   ending connections needs its own permission.
+- Agents can see the screen, read chat and read the clipboard only while screen
+  viewing is allowed; writing the clipboard also needs **Control**. **Stop** blocks
+  every agent action except reading the session status until the session ends.
 - MacViewer asks before a new agent acts. While an agent is controlling the
   computer, the session window shows **AI is controlling · Stop**.
 - Before changing an app's config file, MacViewer saves a `.macviewer-backup`

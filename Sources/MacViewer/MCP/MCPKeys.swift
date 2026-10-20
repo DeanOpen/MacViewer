@@ -50,6 +50,18 @@ enum MCPKeys {
         "up": 0x7e, "capslock": 0x39, "plus": 0x18, "minus": 0x1b,
         "f1": 0x7a, "f2": 0x78, "f3": 0x63, "f4": 0x76, "f5": 0x60, "f6": 0x61, "f7": 0x62, "f8": 0x64,
         "f9": 0x65, "f10": 0x6d, "f11": 0x67, "f12": 0x6f,
+        "f13": 0x69, "f14": 0x6b, "f15": 0x71, "f16": 0x6a, "f17": 0x40,
+        "f18": 0x4f, "f19": 0x50, "f20": 0x5a,
+    ]
+
+    /// US-layout shifted symbols: base hardware key plus Shift.
+    private static let shiftedSymbols: [Character: (key: UInt16, character: Character)] = [
+        "!": (0x12, "!"), "@": (0x13, "@"), "#": (0x14, "#"), "$": (0x15, "$"),
+        "%": (0x17, "%"), "^": (0x16, "^"), "&": (0x1a, "&"), "*": (0x1c, "*"),
+        "(": (0x19, "("), ")": (0x1d, ")"), "_": (0x1b, "_"), "+": (0x18, "+"),
+        "{": (0x21, "{"), "}": (0x1e, "}"), "|": (0x2a, "|"), ":": (0x29, ":"),
+        "\"": (0x27, "\""), "<": (0x2b, "<"), ">": (0x2f, ">"), "?": (0x2c, "?"),
+        "~": (0x32, "~"),
     ]
 
     /// Parses space-separated chords, each joined by "+", e.g. "ctrl+a delete".
@@ -75,10 +87,24 @@ enum MCPKeys {
             guard offset == parts.count - 1 else { throw ParseError.unknownKey(part) }
             if let code = named[name] {
                 chord.key = code
+                if name == "plus" {
+                    // "+" is Shift+"="; carry the character hint and Shift so the
+                    // peer types plus instead of equals.
+                    chord.characters = "+"
+                    if !chord.modifiers.contains(0x38) { chord.modifiers.append(0x38) }
+                }
             } else if name.count == 1, let character = name.first, let code = letters[character] {
                 chord.key = code
-                let shifted = chord.modifiers.contains(0x38)
-                chord.characters = shifted ? String(character).uppercased() : String(character)
+                // An uppercase letter implies Shift even without an explicit token.
+                let uppercase = part.first?.isUppercase == true
+                if uppercase && !chord.modifiers.contains(0x38) { chord.modifiers.append(0x38) }
+                chord.characters = chord.modifiers.contains(0x38)
+                    ? String(character).uppercased() : String(character)
+            } else if name.count == 1, let character = name.first,
+                      let shifted = shiftedSymbols[character] {
+                chord.key = shifted.key
+                chord.characters = String(shifted.character)
+                if !chord.modifiers.contains(0x38) { chord.modifiers.append(0x38) }
             } else {
                 throw ParseError.unknownKey(part)
             }
@@ -108,23 +134,44 @@ enum MCPKeys {
         return events
     }
 
-    /// Text typed as Unicode, with newlines and tabs sent as Enter and Tab.
-    static func typingEvents(for text: String) -> [RemoteInput] {
+    /// Events to type `text` plus an honest count of the UTF-16 units that the
+    /// VK_PACKET path cannot carry (emoji surrogates and control characters).
+    struct TypingPlan: Equatable {
+        let events: [RemoteInput]
+        let totalUnits: Int
+        let sentUnits: Int
+        let skippedUnits: Int
+    }
+
+    static func typingPlan(for text: String) -> TypingPlan {
         var events = [RemoteInput]()
         var pending = ""
+        var skipped = 0
         func flush() { if !pending.isEmpty { events.append(.text(pending)); pending = "" } }
+        func sendable(_ unit: UInt16) -> Bool {
+            unit >= 0x20 && !(0xd800...0xdfff).contains(unit)
+        }
         for character in text {
             switch character {
             case "\n", "\r\n", "\r":
                 flush()
-                events += self.events(for: Chord(modifiers: [], key: 0x24, characters: nil))
+                events += Self.events(for: Chord(modifiers: [], key: 0x24, characters: nil))
             case "\t":
                 flush()
-                events += self.events(for: Chord(modifiers: [], key: 0x30, characters: nil))
-            default: pending.append(character)
+                events += Self.events(for: Chord(modifiers: [], key: 0x30, characters: nil))
+            default:
+                pending.append(character)
+                skipped += character.utf16.filter { !sendable($0) }.count
             }
         }
         flush()
-        return events
+        let total = text.utf16.count
+        return TypingPlan(events: events, totalUnits: total,
+                          sentUnits: max(0, total - skipped), skippedUnits: skipped)
+    }
+
+    /// Text typed as Unicode, with newlines and tabs sent as Enter and Tab.
+    static func typingEvents(for text: String) -> [RemoteInput] {
+        typingPlan(for: text).events
     }
 }

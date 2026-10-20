@@ -156,6 +156,43 @@ struct AgentKeysTests {
         #expect(events[3] == .text("b"))
         #expect(events.last == .text("c"))
     }
+
+    @Test("Uppercase letters, shifted symbols, plus and F13–F20 parse to real keys")
+    func shiftedAndFunctionKeys() throws {
+        // Uppercase implies Shift and the typed character follows the case.
+        let upper = try MCPKeys.parseChord("A")
+        #expect(upper.key == 0x00 && upper.characters == "A" && upper.modifiers.contains(0x38))
+        let explicit = try MCPKeys.parseChord("shift+a")
+        #expect(explicit.key == 0x00 && explicit.characters == "A")
+        // Symbols map to their US base key with Shift.
+        #expect(try MCPKeys.parseChord("!") == MCPKeys.Chord(modifiers: [0x38], key: 0x12, characters: "!"))
+        #expect(try MCPKeys.parseChord("?") == MCPKeys.Chord(modifiers: [0x38], key: 0x2c, characters: "?"))
+        #expect(try MCPKeys.parseChord("@").key == 0x13)
+        let plus = try MCPKeys.parseChord("plus")
+        #expect(plus.key == 0x18 && plus.characters == "+" && plus.modifiers.contains(0x38))
+        #expect(try MCPKeys.parseChord("ctrl++").key == 0x18)
+        // Extended function keys now parse instead of failing.
+        #expect(try MCPKeys.parseChord("f13").key == 0x69)
+        #expect(try MCPKeys.parseChord("F20").key == 0x5a)
+        #expect(throws: MCPKeys.ParseError.unknownKey("hyper")) { try MCPKeys.parseChord("hyper+a") }
+    }
+
+    @Test("type_text reports UTF-16 units that VK_PACKET cannot carry")
+    func typingHonesty() {
+        let plain = MCPKeys.typingPlan(for: "abc")
+        #expect(plain.totalUnits == 3 && plain.sentUnits == 3 && plain.skippedUnits == 0)
+        #expect(plain.events == [.text("abc")])
+        // Emoji are surrogate pairs; control characters are not VK_PACKET units.
+        let mixed = MCPKeys.typingPlan(for: "a😀b\u{01}")
+        #expect(mixed.totalUnits == 5)   // a + 2 surrogate units + b + control
+        #expect(mixed.skippedUnits == 3)
+        #expect(mixed.sentUnits == 2)
+        // Enter and Tab are sent as keys and count as sent units.
+        let keys = MCPKeys.typingPlan(for: "a\nb\tc")
+        #expect(keys.totalUnits == 5 && keys.skippedUnits == 0 && keys.sentUnits == 5)
+        #expect(keys.events.contains(.key(keyCode: 0x24, characters: nil, pressed: true, modifiers: [])))
+        #expect(keys.events.contains(.key(keyCode: 0x30, characters: nil, pressed: true, modifiers: [])))
+    }
 }
 
 @MainActor

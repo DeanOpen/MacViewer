@@ -134,18 +134,46 @@ struct MacRemoteInputEncoderTests {
         #expect(encoder.encode(.pointerButton(button: 3, pressed: true, x: 1, y: 1)).isEmpty)
     }
 
-    @Test("Wheel accumulates fractional units into signed120 steps and ignores unverified horizontal input")
-    func verticalWheel() {
+    @Test("Double-click sends the dedicated 0x203/0x206/0x209 message once")
+    func doubleClickMessages() {
+        var left = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        #expect(left.encode(.doubleClick(button: 0, x: 30, y: 40)).map { String(decoding: $0, as: UTF8.self) } == [
+            "8|||512|||0|||30|||40", "8|||515|||0|||2621470"
+        ])
+        // The double-click message already released the button on the wire.
+        #expect(left.encode(.pointerButton(button: 0, pressed: false, x: 30, y: 40)).isEmpty)
+        var right = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        #expect(right.encode(.doubleClick(button: 1, x: 1, y: 1)).last
+            .map { String(decoding: $0, as: UTF8.self) } == "8|||518|||0|||65537")
+        var middle = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        #expect(middle.encode(.doubleClick(button: 2, x: 1, y: 1)).last
+            .map { String(decoding: $0, as: UTF8.self) } == "8|||521|||0|||65537")
+        var unknown = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        #expect(unknown.encode(.doubleClick(button: 3, x: 1, y: 1)).isEmpty)
+    }
+
+    @Test("Wheel accumulates fractional units for both axes into signed120 steps")
+    func wheelAccumulation() {
         var encoder = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
-        #expect(encoder.encode(.scroll(deltaX: 10, deltaY: 0)).isEmpty)
+        #expect(encoder.encode(.scroll(deltaX: 1, deltaY: 0)).map { String(decoding: $0, as: UTF8.self) }
+            == ["8|||526|||7864320|||0"])
+        #expect(encoder.encode(.scroll(deltaX: -1, deltaY: 0)).map { String(decoding: $0, as: UTF8.self) }
+            == ["8|||526|||-7864320|||0"])
         #expect(encoder.encode(.scroll(deltaX: 0, deltaY: 0.5)).isEmpty)
+        #expect(encoder.encode(.scroll(deltaX: 0.5, deltaY: 0)).isEmpty)
         #expect(encoder.encode(.scroll(deltaX: 0, deltaY: 0.5)).map { String(decoding: $0, as: UTF8.self) }
             == ["8|||522|||7864320|||0"])
+        #expect(encoder.encode(.scroll(deltaX: 0.5, deltaY: 0)).map { String(decoding: $0, as: UTF8.self) }
+            == ["8|||526|||7864320|||0"])
         #expect(encoder.encode(.scroll(deltaX: 0, deltaY: -1)).map { String(decoding: $0, as: UTF8.self) }
             == ["8|||522|||-7864320|||0"])
         #expect(encoder.encode(.scroll(deltaX: 0, deltaY: .infinity)).isEmpty)
         #expect(encoder.encode(.scroll(deltaX: 0, deltaY: .nan)).isEmpty)
         #expect(encoder.encode(.scroll(deltaX: 0, deltaY: .greatestFiniteMagnitude)).count == 1)
+        // A diagonal gesture emits one message per axis.
+        var both = MacRemoteInputEncoder(supportsBinaryKeyboard: true)
+        let diagonal = both.encode(.scroll(deltaX: 1, deltaY: 1)).map { String(decoding: $0, as: UTF8.self) }
+        #expect(diagonal == ["8|||522|||7864320|||0", "8|||526|||7864320|||0"])
     }
 
     @Test("Caps state rides real keyboard packets and keyboard capability must be explicit")

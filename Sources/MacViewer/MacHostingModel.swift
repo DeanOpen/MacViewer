@@ -86,6 +86,48 @@ final class MacHostingModel: ObservableObject {
         permissions = MacHostingPermissions.refresh()
         if phase == .sharing, allowsControl, !canControl { setControlAllowed(false) }
     }
+
+    /// While a viewer is connected the local permission state can change without
+    /// any app activation (System Settings revocation, TCC reset). Re-check at a
+    /// bounded rate during capture so control is revoked promptly and the UI does
+    /// not keep claiming the Mac is controlled.
+    private static let permissionRefreshInterval: TimeInterval = 1
+    private var lastPermissionRefresh = Date.distantPast
+    private var announcedInputPause = false
+
+    func refreshSharingPermissions() {
+        guard phase == .sharing else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastPermissionRefresh) >= Self.permissionRefreshInterval else { return }
+        lastPermissionRefresh = now
+        let current = MacHostingPermissions.refresh()
+        guard current != permissions else { return }
+        let previouslyControlled = allowsControl
+        permissions = current
+        switch HostPermissionChangePolicy.action(wasAllowingControl: previouslyControlled, canControl: canControl) {
+        case .none:
+            break
+        case .revokeControl:
+            setControlAllowed(false)
+            if !current.accessibility {
+                errorMessage = "Remote control paused. Check Accessibility permission."
+            }
+        }
+    }
+
+    /// Surface the brief window after a hot-plug/layout change where capture
+    /// geometry is rebuilt and remote input is ignored, instead of dropping it
+    /// silently. Resets as soon as new geometry is available.
+    private func announceInputPausedForDisplayChange() {
+        guard allowsControl, !announcedInputPause else { return }
+        announcedInputPause = true
+        status = "Remote control is paused while the display changes."
+    }
+
+    private func noteInputGeometryAvailable() {
+        guard input.geometry != nil else { return }
+        announcedInputPause = false
+    }
     func requestScreenRecording() {
         if !MacHostingPermissions.requestScreenRecording() { MacHostingPermissions.openScreenRecordingSettings() }
         refreshPermissions()
@@ -146,6 +188,7 @@ final class MacHostingModel: ObservableObject {
                         viewer = request; pendingRequest = nil; isApproving = false; isAutoApproving = false
                         isEndingViewer = false; phase = .sharing
                         input.setGeometry(capturedDisplayRevision == displayRevision ? capture.geometry : nil)
+                        noteInputGeometryAvailable()
                         status = allowsControl ? "Your Mac is being viewed and controlled." : "Your Mac is being viewed."
                         if newViewer { activateTools(session: session, viewerID: request.id, token: token) }
                     case let .chat(sessionID, text):
@@ -173,19 +216,31 @@ final class MacHostingModel: ObservableObject {
                               viewer?.id == sessionID, request.sessionID == sessionID,
                               viewer?.viewerID == request.claimedID else { continue }
                         pendingSideSwitch = request
-                    case let .captureRequested(ticket): captureNextFrame(ticket, token: token, session: session)
+                    case let .captureRequested(ticket):
+                        refreshSharingPermissions()
+                        captureNextFrame(ticket, token: token, session: session)
                     case let .input(sessionID, payload):
-                        guard allowsControl, viewer?.id == sessionID,
-                              input.geometry != nil,
-                              await session.isControlAllowed(for: sessionID) else { continue }
+                        guard allowsControl, viewer?.id == sessionID else { continue }
+                        guard input.geometry != nil else {
+                            announceInputPausedForDisplayChange()
+                            continue
+                        }
+                        guard await session.isControlAllowed(for: sessionID) else { continue }
                         guard generation == token, viewer?.id == sessionID, allowsControl,
                               input.geometry != nil else { continue }
                         do { _ = try input.handleAuthenticatedPayload(payload) }
                         catch {
-                            allowsControl = false; input.releaseAll()
-                            try? await session.setControlAllowed(false, session: sessionID)
-                            guard generation == token, viewer?.id == sessionID else { continue }
-                            errorMessage = "Remote control paused. Check Accessibility permission."
+                            switch HostInputFailurePolicy.action(for: error) {
+                            case .ignore:
+                                // A malformed or undeliverable event must not take
+                                // control away (or blame Accessibility).
+                                break
+                            case let .revokeControl(message):
+                                allowsControl = false; input.releaseAll()
+                                try? await session.setControlAllowed(false, session: sessionID)
+                                guard generation == token, viewer?.id == sessionID else { continue }
+                                errorMessage = message
+                            }
                         }
                     case .releaseInput: input.releaseAll()
                     case let .viewerEnded(reason):
@@ -237,6 +292,7 @@ final class MacHostingModel: ObservableObject {
                 guard generation == token, captureGeneration == captureToken,
                       pendingRequest?.id == request.id else { return }
                 input.setGeometry(capture.geometry)
+                noteInputGeometryAvailable()
                 allowsControl = control
                 try await session.approve(request.id, firstFrame: frame, allowsControl: control)
             } catch is CancellationError {
@@ -380,6 +436,8 @@ final class MacHostingModel: ObservableObject {
         let session = engine; engine = nil
         phase = .off; identifier = nil; password = ""
         pendingRequest = nil; viewer = nil; allowsControl = false; isApproving = false; isAutoApproving = false
+        announcedInputPause = false
+        lastPermissionRefresh = Date.distantPast
         status = "Incoming access is paused."
         let previous = stopping
         stopping = Task {
@@ -500,6 +558,7 @@ final class MacHostingModel: ObservableObject {
                 guard generation == token, captureGeneration == captureToken, viewer?.id == viewerID,
                       displayRevision == displayToken else { return }
                 input.setGeometry(geometry)
+                noteInputGeometryAvailable()
             } catch {
                 guard generation == token, captureGeneration == captureToken,
                       viewer?.id == viewerID, !Task.isCancelled else { return }
@@ -567,5 +626,35 @@ struct HostCaptureRecoveryPolicy {
 
     static func retryDelay(attempt: Int) -> TimeInterval {
         baseRetryDelay * Double(max(0, attempt) + 1)
+    }
+}
+
+/// How one failed remote input event affects the local control grant. Only a
+/// genuine permission failure should take control away; malformed or
+/// undeliverable events are dropped without changing the user's choice.
+enum HostInputFailurePolicy {
+    enum Action: Equatable {
+        case ignore
+        case revokeControl(message: String)
+    }
+
+    static func action(for error: any Error) -> Action {
+        guard let error = error as? MacHostInputError else { return .ignore }
+        switch error {
+        case .accessibilityRequired:
+            return .revokeControl(message: "Remote control paused. Check Accessibility permission.")
+        case .malformedPayload, .geometryUnavailable, .eventCreationFailed:
+            return .ignore
+        }
+    }
+}
+
+/// Permission changes while a viewer is connected: revoke control as soon as a
+/// required permission disappears, even if no app activation refreshes the UI.
+enum HostPermissionChangePolicy {
+    enum Action: Equatable { case none, revokeControl }
+
+    static func action(wasAllowingControl: Bool, canControl: Bool) -> Action {
+        wasAllowingControl && !canControl ? .revokeControl : .none
     }
 }

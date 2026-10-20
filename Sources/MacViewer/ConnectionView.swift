@@ -27,6 +27,9 @@ struct ConnectionView: View {
     @Environment(\.locale) private var appLocale
     @State private var confirmSideSwitch = false
     @State private var isSwitchingSides = false
+    /// The window showing the remote session; used to release held input when
+    /// another window or sheet takes the keyboard.
+    @State private var sessionWindow: NSWindow?
     private enum Field { case partner, password }
 
     var body: some View {
@@ -69,6 +72,7 @@ struct ConnectionView: View {
         .onChange(of: model.phase) { phase in
             if phase == .connecting || phase == .connected { showSession = true }
             if phase == .disconnected || phase == .idle { remoteCapture.endSession() }
+            if phase == .connected { sessionWindow = NSApp.keyWindow }
         }
         .onAppear {
             let capture = remoteCapture
@@ -84,6 +88,14 @@ struct ConnectionView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             model.releaseRemoteInput()
             revealPassword = false
+        }
+        // A sheet, Settings window or the floating chat can take the keyboard
+        // without deactivating the app; do not leave keys/buttons held remotely.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            guard model.phase == .connected,
+                  let window = note.object as? NSWindow,
+                  sessionWindow == nil || window === sessionWindow else { return }
+            model.releaseRemoteInput()
         }
         .appDialog(updateAlertTitle, isPresented: $updater.showResult, message: updateAlertMessage, buttons: [.cancel(L("OK"))])
         // Hosted on a background view so it never competes with the incoming-request sheet.
@@ -621,7 +633,8 @@ struct ConnectionView: View {
             Divider()
             }
             if let error = model.errorMessage { errorLabel(error).padding(16) }
-            if let notice = model.monitorNotice { monitorNoticeLabel(notice).padding(.horizontal, 16).padding(.vertical, 8) }
+            if let notice = model.monitorNotice { sessionNoticeLabel(notice, symbol: "display").padding(.horizontal, 16).padding(.vertical, 8) }
+            if let notice = model.keyboardNotice { sessionNoticeLabel(notice, symbol: "keyboard").padding(.horizontal, 16).padding(.vertical, 8) }
             HStack(spacing: 0) {
                 Group {
                     if let size = model.displayedSize, model.phase == .connected {
@@ -727,9 +740,9 @@ struct ConnectionView: View {
         Label(L(text), systemImage: "exclamationmark.circle.fill")
             .font(.callout).foregroundColor(.red).fixedSize(horizontal: false, vertical: true)
     }
-    /// `monitorNotice` is already localized when the model sets it.
-    private func monitorNoticeLabel(_ text: String) -> some View {
-        Label(text, systemImage: "display")
+    /// Session notices are already localized when the model sets them.
+    private func sessionNoticeLabel(_ text: String, symbol: String) -> some View {
+        Label(text, systemImage: symbol)
             .font(.callout).foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
     }
 
