@@ -34,6 +34,8 @@ final class ConnectionModel: ObservableObject {
     static let rememberPartnersKey = "MacViewer.rememberPartners"
     static let rememberPasswordKey = "MacViewer.rememberPassword"
     static let computerAudioKey = "MacViewer.computerAudio"
+    /// Persisted remote-cursor overlay preference; on when no value is stored.
+    static let showRemoteCursorKey = "MacViewer.showRemoteCursor"
     private static let recentPartnersKey = "MacViewer.recentPartners"
     private static let partnerNamesKey = "MacViewer.partnerNames"
 
@@ -127,8 +129,10 @@ final class ConnectionModel: ObservableObject {
         self.credentials = credentials ?? KeychainPartnerCredentialStore()
         self.audioPlayer = audioPlayer ?? RemoteAudioPlayer(defaults: defaults)
         self.inputBufferCapacity = inputBufferCapacity
-        defaults.register(defaults: [Self.rememberPartnersKey: true, Self.rememberPasswordKey: true])
+        defaults.register(defaults: [Self.rememberPartnersKey: true, Self.rememberPasswordKey: true,
+                                      Self.showRemoteCursorKey: true])
         rememberPassword = defaults.bool(forKey: Self.rememberPasswordKey)
+        showRemoteCursor = defaults.bool(forKey: Self.showRemoteCursorKey)
         recentPartners = defaults.bool(forKey: Self.rememberPartnersKey)
             ? Array((defaults.stringArray(forKey: Self.recentPartnersKey) ?? []).prefix(10))
             : []
@@ -300,6 +304,18 @@ final class ConnectionModel: ObservableObject {
         updateDisplayedFrame()
     }
 
+    /// Cycles [all monitors, M1, M2, …] to the next monitor. Selection is a local
+    /// crop change: held input is released, the choice is remembered per partner.
+    func selectNextMonitor() { cycleMonitor(forward: true) }
+
+    /// Cycles [all monitors, M1, M2, …] to the previous monitor.
+    func selectPreviousMonitor() { cycleMonitor(forward: false) }
+
+    private func cycleMonitor(forward: Bool) {
+        guard phase == .connected, let monitors = remoteInfo?.monitors, monitors.count > 1 else { return }
+        selectMonitor(RemoteMonitorCycle.next(current: selectedMonitor, monitors: monitors, forward: forward))
+    }
+
     /// Keeps the last explicit choice for this partner, including "all monitors".
     private func rememberMonitorSelection() {
         guard let identifier = remoteInfo?.partnerID ?? (isSessionActive ? normalizedPartnerID : nil),
@@ -336,6 +352,7 @@ final class ConnectionModel: ObservableObject {
 
     func setShowRemoteCursor(_ enabled: Bool) {
         showRemoteCursor = enabled
+        defaults.set(enabled, forKey: Self.showRemoteCursorKey)
         updateRemoteCursor()
         sendCommands([RemoteControlCommands.cursorPositions(enabled: enabled)], requiresControl: false)
     }
@@ -778,5 +795,19 @@ final class ConnectionModel: ObservableObject {
         inputOverflow = nil
         inputTask?.cancel()
         inputTask = nil
+    }
+}
+
+/// Pure monitor cycle used by the View-menu shortcuts and the ⌃⌥⌘1…9 hook.
+/// Order is [all monitors (0), M1, M2, …]; a single/no monitor stays on all, an
+/// unknown current value falls back to all.
+enum RemoteMonitorCycle {
+    static func next(current: Int, monitors: [RemoteMonitor], forward: Bool) -> Int {
+        // A single (or absent) monitor has nothing to switch between.
+        guard monitors.count > 1 else { return 0 }
+        let options = [0] + monitors.map(\.index)
+        guard let position = options.firstIndex(of: current) else { return 0 }
+        let offset = forward ? 1 : options.count - 1
+        return options[(position + offset) % options.count]
     }
 }
