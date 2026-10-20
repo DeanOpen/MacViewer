@@ -190,11 +190,28 @@ final class MacScreenCapture {
             throw MacScreenCaptureError.displayConfigurationChanged
         }
         guard CGPreflightScreenCaptureAccess() else { throw MacScreenCaptureError.screenRecordingRequired }
-        let pixels = try MacScreenPixels.composite(images: images, layout: layout)
+        // Composite + RGB555 packing is CPU work (~9-18 ms). Keep it off the
+        // MainActor; screenshots and layout state still belong to this actor.
+        let pixels = try await Self.compositeOffMainActor(images: images, layout: layout)
         geometry = layout.geometry
         return HostedScreenFrame(width: layout.width, height: layout.height,
                                  rgb555BottomUp: pixels, monitors: layout.monitors,
                                  layoutIdentifier: layout.surfaces.map { "\($0.display.key):\($0.display.bounds)" }.joined(separator: ";"))
+    }
+
+    /// Captured CGImages are immutable and only read by the compositor; the
+    /// wrappers exist so Swift 6 can move them to a detached task without
+    /// sharing any mutable screen-capture state.
+    private struct SurfaceImages: @unchecked Sendable {
+        let images: [CGImage]
+        let layout: MacDisplayLayout
+    }
+
+    private static func compositeOffMainActor(images: [CGImage], layout: MacDisplayLayout) async throws -> Data {
+        let input = SurfaceImages(images: images, layout: layout)
+        return try await Task.detached(priority: .userInitiated) {
+            try MacScreenPixels.composite(images: input.images, layout: input.layout)
+        }.value
     }
 
     func reset() {
