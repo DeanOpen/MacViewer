@@ -48,8 +48,12 @@ Windows executable code.
 - **Vietnamese and Chinese typing** while controlling: use a macOS input
   method (Telex/VNI, EVKey, Pinyin…). For Vietnamese you can also turn it off
   and use Unikey on the remote PC
-- Toolbar with monitor selection, scaling, quality, wallpaper, remote cursor
-  and **remote computer audio**
+- Toolbar with a first-class **monitor switcher** for multi-monitor remotes
+  (also <kbd>⌃⌥⌘0</kbd>/<kbd>⌃⌥⌘1…9</kbd> while the remote screen has focus,
+  <kbd>⌃⌥⌘]</kbd> and <kbd>⌃⌥⌘[</kbd>),
+  **fit-to-window ↔ actual size** (<kbd>⌃⌥⌘F</kbd>), show/hide the remote cursor
+  (<kbd>⌃⌥⌘P</kbd>), image quality, wallpaper and **remote computer audio**.
+  The fit mode and cursor choice are remembered for the next session
 - Screenshots with region selection and annotations, and **video recording**
 - Floating **chat** panel and opt-in two-way **clipboard** sharing
 - **Send and receive files** in chat: click 📎 or drop files on the chat, and

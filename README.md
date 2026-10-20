@@ -48,8 +48,12 @@ SwiftUI/AppKit, không cần Wine và không chạy bất kỳ file `.exe` nào 
 - **Gõ tiếng Việt, tiếng Trung** khi điều khiển: dùng bộ gõ của macOS
   (Telex/VNI, EVKey, Pinyin…). Với tiếng Việt cũng có thể tắt bộ gõ trên Mac và
   dùng Unikey ở máy kia
-- Thanh công cụ: chọn màn hình, thu phóng, chất lượng hình, ẩn/hiện hình nền,
-  con trỏ chuột và **nghe âm thanh từ máy kia**
+- Thanh công cụ có **nút chuyển màn hình** khi máy kia dùng nhiều màn hình
+  (hoặc phím tắt <kbd>⌃⌥⌘0</kbd>/<kbd>⌃⌥⌘1…9</kbd> khi màn hình từ xa đang
+  được chọn, <kbd>⌃⌥⌘]</kbd> và <kbd>⌃⌥⌘[</kbd>), nút **Vừa khung ↔ Kích thước thật**
+  (<kbd>⌃⌥⌘F</kbd>), nút ẩn/hiện con trỏ máy kia (<kbd>⌃⌥⌘P</kbd>), chất lượng
+  hình, ẩn/hiện hình nền và **nghe âm thanh từ máy kia**. Lựa chọn vừa khung và
+  ẩn con trỏ được ghi nhớ cho lần sau
 - Chụp màn hình (chọn vùng, ghi chú lên ảnh) và **quay video**
 - **Chat** với người bên kia và đồng bộ **clipboard** hai chiều (tùy chọn)
 - **Gửi và nhận file** ngay trong chat: bấm 📎 hoặc kéo thả file vào khung chat,
