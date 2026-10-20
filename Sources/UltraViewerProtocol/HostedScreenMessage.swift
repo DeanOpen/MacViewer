@@ -100,10 +100,29 @@ public enum HostedScreenMessage {
     /// rectangle rows before writing the Windows bottom-up converter DIB.
     public static func fullFrame(_ frame: HostedScreenFrame, sequence: Int32,
                                  compression: Compression = .zstandard) throws -> Data {
-        let byteCount = try checkedPixelCount(width: frame.width, height: frame.height)
-        guard frame.rgb555BottomUp.count == byteCount else {
-            throw Error.invalidPixelLength(expected: byteCount, received: frame.rgb555BottomUp.count)
+        try self.frame(frame, region: .full(width: frame.width, height: frame.height),
+                       sequence: sequence, compression: compression)
+    }
+
+    /// One main rectangle covering `region` of `frame`, encoded exactly like the
+    /// recovered full-frame message: part 1 is the top-down rectangle, part 2 is
+    /// Zstd of that rectangle's top-down packed RGB555 rows, everything else is
+    /// empty and part 4 carries the sequence. The receiver stages the rectangle
+    /// then copies it to the rectangle destination, so a partial rectangle is a
+    /// wire-compatible phase-1 update.
+    public static func frame(_ frame: HostedScreenFrame, region: HostedScreenRegion, sequence: Int32,
+                             compression: Compression = .zstandard) throws -> Data {
+        let canvasBytes = try checkedPixelCount(width: frame.width, height: frame.height)
+        guard frame.rgb555BottomUp.count == canvasBytes else {
+            throw Error.invalidPixelLength(expected: canvasBytes, received: frame.rgb555BottomUp.count)
         }
+        guard region.width > 0, region.height > 0,
+              region.x >= 0, region.y >= 0,
+              region.x <= frame.width, region.width <= frame.width - region.x,
+              region.y <= frame.height, region.height <= frame.height - region.y else {
+            throw Error.invalidGeometry
+        }
+        let byteCount = region.width * region.height * 2
         // 11 length words + command + rectangle + sequence. The compressed
         // part gets the remaining budget, including its own Zstd frame header.
         let maximumCompressedBytes = maximumPayloadBytes - (44 + 1 + 8 + 4)
@@ -113,19 +132,22 @@ public enum HostedScreenMessage {
                 throw Error.sizeLimitExceeded
             }
         }
-        let stride = frame.width * 2
+        let sourceStride = frame.width * 2
+        let targetStride = region.width * 2
         var topDown = Data(count: byteCount)
         frame.rgb555BottomUp.withUnsafeBytes { source in
             topDown.withUnsafeMutableBytes { target in
-                for row in 0..<frame.height {
-                    target.baseAddress!.advanced(by: row * stride).copyMemory(
-                        from: source.baseAddress!.advanced(by: (frame.height - row - 1) * stride),
-                        byteCount: stride)
+                guard let sourceBase = source.baseAddress, let targetBase = target.baseAddress else { return }
+                for row in 0..<region.height {
+                    let sourceRow = frame.height - 1 - (region.y + row)
+                    targetBase.advanced(by: row * targetStride).copyMemory(
+                        from: sourceBase.advanced(by: sourceRow * sourceStride + region.x * 2),
+                        byteCount: targetStride)
                 }
             }
         }
         var rectangle = Data()
-        for value in [UInt16(0), 0, UInt16(frame.width), UInt16(frame.height)] {
+        for value in [UInt16(region.x), UInt16(region.y), UInt16(region.width), UInt16(region.height)] {
             rectangle.append(UInt8(truncatingIfNeeded: value))
             rectangle.append(UInt8(value >> 8))
         }
@@ -181,5 +203,18 @@ public enum HostedScreenMessage {
     private static func long(_ value: Int32) -> Data {
         let bits = UInt32(bitPattern: value)
         return Data((0..<4).map { UInt8(truncatingIfNeeded: bits >> ($0 * 8)) })
+    }
+}
+
+/// Runs the CPU-heavy row reversal and Zstd encode for host frames off the
+/// session actor (and off the MainActor). The caller still owns sequence
+/// numbering and one-frame-in-flight accounting; the actor only transforms a
+/// captured frame and its dirty region into the ready multipart payload.
+public actor HostedFrameEncoder {
+    public init() {}
+
+    public func encode(_ frame: HostedScreenFrame, region: HostedScreenRegion, sequence: Int32,
+                       compression: HostedScreenMessage.Compression = .zstandard) throws -> Data {
+        try HostedScreenMessage.frame(frame, region: region, sequence: sequence, compression: compression)
     }
 }

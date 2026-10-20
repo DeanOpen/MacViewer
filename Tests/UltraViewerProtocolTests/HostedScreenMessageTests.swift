@@ -173,3 +173,109 @@ import Testing
     }
     #expect(HostedScreenMessage.firstFrameNumber == ModernScreenRenderer.resetFrameNumber + 1)
 }
+
+private func hostedRGB555Frame(width: Int, height: Int,
+                               changed: [(x: Int, y: Int, value: UInt16)] = []) -> HostedScreenFrame {
+    var bytes = [UInt8](repeating: 0, count: width * height * 2)
+    for edit in changed {
+        let bottomUpRow = height - 1 - edit.y
+        let offset = (bottomUpRow * width + edit.x) * 2
+        bytes[offset] = UInt8(truncatingIfNeeded: edit.value)
+        bytes[offset + 1] = UInt8(truncatingIfNeeded: edit.value >> 8)
+    }
+    return HostedScreenFrame(width: width, height: height, rgb555BottomUp: Data(bytes))
+}
+
+private func hostedDecodedFrame(_ payload: Data) throws -> ModernScreenFrameMessage {
+    try ModernScreenFrameMessage.decode(parts: try MultipartPayload.decode(payload))
+}
+
+@Test func hostedFullCanvasRegionMatchesLegacyFullFrameBytes() throws {
+    let frame = hostedRGB555Frame(width: 32, height: 18,
+                                  changed: [(0, 0, 0x7c00), (31, 17, 0x03e0), (5, 4, 0x1f)])
+    for compression in [HostedScreenMessage.Compression.zstandard, .raw] {
+        let legacy = try HostedScreenMessage.fullFrame(frame, sequence: 11, compression: compression)
+        let region = try HostedScreenMessage.frame(frame, region: .full(width: 32, height: 18),
+                                                   sequence: 11, compression: compression)
+        #expect(region == legacy)
+    }
+}
+
+@Test func hostedRegionFrameEncodesOneRectangleAndRoundTripsThroughRenderer() throws {
+    let width = 64, height = 48
+    let region = HostedScreenRegion(x: 16, y: 8, width: 32, height: 16)
+    var changed: [(x: Int, y: Int, value: UInt16)] = []
+    for y in region.y..<(region.y + region.height) {
+        for x in region.x..<(region.x + region.width) {
+            changed.append((x, y, UInt16(truncatingIfNeeded: (x &* 37 &+ y &* 11 &+ 1) & 0x7fff)))
+        }
+    }
+    let modified = hostedRGB555Frame(width: width, height: height, changed: changed)
+    let blank = hostedRGB555Frame(width: width, height: height)
+    let payload = try HostedScreenMessage.frame(modified, region: region, sequence: 7)
+    let parts = try MultipartPayload.decode(payload)
+    #expect(parts.count == 11)
+    #expect(parts[1] == Data([16, 0, 8, 0, 32, 0, 16, 0]))
+    #expect(parts[4] == Data([7, 0, 0, 0]))
+    #expect(parts[3].isEmpty && parts[5].isEmpty && parts[6].isEmpty && parts[7].isEmpty)
+
+    // Part 2 is Zstd of the rectangle's top-down RGB555 rows.
+    let message = try hostedDecodedFrame(payload)
+    #expect(message.mainRectangles.map { [$0.x, $0.y, $0.width, $0.height] } == [[16, 8, 32, 16]])
+    let raw = try ModernScreenRenderer.decompressMainPixels(message)
+    var expected: [UInt8] = []
+    for row in 0..<region.height {
+        let sourceRow = height - 1 - (region.y + row)
+        let start = (sourceRow * width + region.x) * 2
+        expected.append(contentsOf: modified.rgb555BottomUp[start..<(start + region.width * 2)])
+    }
+    #expect(raw == Data(expected))
+
+    // Applying the single region frame to a blank canvas produces the same
+    // bitmap as applying the full modified frame.
+    let reset = ModernScreenRenderer.resetFrameNumber
+    func renderer() throws -> ModernScreenRenderer {
+        try ModernScreenRenderer(width: width, height: height, displayColors: 2, lastFrameNumber: reset)
+    }
+    let reference = try renderer()
+    _ = try reference.apply(try hostedDecodedFrame(
+        HostedScreenMessage.fullFrame(blank, sequence: reset + 1)))
+    let expectedBitmap = try reference.apply(try hostedDecodedFrame(
+        HostedScreenMessage.fullFrame(modified, sequence: reset + 2)))
+
+    let partial = try renderer()
+    _ = try partial.apply(try hostedDecodedFrame(
+        HostedScreenMessage.fullFrame(blank, sequence: reset + 1)))
+    let partialBitmap = try partial.apply(try hostedDecodedFrame(payload.withSequence(reset + 2)))
+    #expect(partialBitmap.bgrPixels == expectedBitmap.bgrPixels)
+}
+
+private extension Data {
+    /// Rewrites the sequence word (part 4) of an already encoded multipart frame.
+    func withSequence(_ sequence: Int32) throws -> Data {
+        var parts = try MultipartPayload.decode(self)
+        let bits = UInt32(bitPattern: sequence)
+        parts[4] = Data((0..<4).map { UInt8(truncatingIfNeeded: bits >> ($0 * 8)) })
+        return try MultipartPayload.encode(parts)
+    }
+}
+
+@Test func hostedRegionFrameRejectsInvalidRectangles() throws {
+    let frame = hostedRGB555Frame(width: 32, height: 18)
+    for region in [HostedScreenRegion(x: 0, y: 0, width: 0, height: 1),
+                   HostedScreenRegion(x: 0, y: 0, width: 1, height: 0),
+                   HostedScreenRegion(x: -1, y: 0, width: 1, height: 1),
+                   HostedScreenRegion(x: 0, y: -1, width: 1, height: 1),
+                   HostedScreenRegion(x: 32, y: 0, width: 1, height: 1),
+                   HostedScreenRegion(x: 0, y: 18, width: 1, height: 1),
+                   HostedScreenRegion(x: 20, y: 0, width: 13, height: 1)] {
+        #expect(throws: HostedScreenMessage.Error.invalidGeometry) {
+            try HostedScreenMessage.frame(frame, region: region, sequence: 1)
+        }
+    }
+    let short = HostedScreenFrame(width: 32, height: 18, rgb555BottomUp: Data(count: 32 * 18 * 2 - 2))
+    #expect(throws: HostedScreenMessage.Error.invalidPixelLength(expected: 32 * 18 * 2, received: 32 * 18 * 2 - 2)) {
+        try HostedScreenMessage.frame(short, region: .full(width: 32, height: 18), sequence: 1)
+    }
+}
+
