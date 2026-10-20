@@ -159,6 +159,61 @@ Severity: **P0** breaks a core workflow, **P1** major quality/usability, **P2** 
 
 ---
 
+## K. Detailed proposals for the three highest-impact open items
+
+These are the proposals that are deliberately **not** implemented in #10/#11/#12 yet. They either need a Windows peer capture (K1, K3) or a dedicated performance change (K2), so they are written here as implementation plans rather than speculative patches.
+
+### K1. Partial frame updates + honouring the viewer quality preset
+
+**Problem.** The host sends the whole canvas on every frame. On a 4K desktop that is 16.6 MB of RGB555 before compression; measured zstd level-1 encoding alone is ~32 ms, and the uplink becomes the frame-rate ceiling (a 1 Gbps link needs ~0.13 s per frame; 5 Mbps needs ~26 s). A static screen changes nothing yet still pays the full cost, and the viewer's quality preset is ignored: the host only parses `32|||1` and has no handler for `31|||N` (quality 0–100) or `32|||2`.
+
+**Proposal, in two phases.**
+
+1. **Incremental rectangle updates using the existing message shape (safe first step).** Keep one main rectangle (part 1) and one compressed payload (part 2) exactly as `HostedScreenMessage.fullFrame` does today, but make the rectangle the bounding box of what changed since the previous frame:
+   - keep the previous RGB555 bottom-up buffer; compare 32×32 tiles (cheap `memcmp` per tile); merge adjacent dirty tiles into a rectangle (or a small list merged into one bounding box when fragmented);
+   - rows inside the rectangle are reversed and compressed exactly like the full frame, so the existing decoder/renderer path is unchanged; a full frame is still sent for the first frame, after a resize, after a display change, on decoder refresh, or when the dirty area exceeds ~40–50 %;
+   - add a `fullFrame: Bool` flag inside the host pipeline (not on the wire) so ACK/deadline logic stays identical.
+2. **Multi-rectangle/copy/scroll/cache (after a Windows capture).** `ModernScreenMessage` already decodes multiple main rectangles (part 1), copy-from-temporary (part 5), scroll (part 6) and the two cache parts (9/10), but the exact producer layout (rectangle order, whether pixels are concatenated top-down per rectangle, whether copy/scroll are emitted in the same frame) must be confirmed by recording a real Windows host while typing, scrolling and moving a window. Only then extend `HostedScreenMessage` to emit multiple rectangles/copy/scroll/cache. The bounding-box phase above gives most of the benefit for typing/mouse edits with no compatibility risk.
+
+**Quality preset.** Add host-side handling for `31|||N` and `32|||2` (color mode stays RGB555) in the host session, map to a **capture pixel budget** rather than changing the wire:
+   - e.g. speed ≈ 1.5 Mpx, automatic ≈ current shape-agnostic budget (8.3 Mpx multi / 2.07 Mpx single), quality ≈ 12–16 Mpx, custom maps linearly; never exceed the display's native pixels and never upscale;
+   - optionally choose zstd level 1 vs 3 with the preset, and persist the session's choice;
+   - add feedback: if ACK round-trip > 250 ms or bytes/s exceeds a cap for 3 frames, step the budget down; step it back up after 5 fast frames (hysteresis). This also protects slow relays.
+   - Files: `HostedScreenMessage` (new region encoder), `UltraViewerHostSession`/`MacHostingModel` (parse 31/32, hold previous frame + budget), `MacScreenCapture`/`MacDisplayLayout` (budget input), tests for rectangle packing and budget mapping, diagnostics (dirty %, bytes/frame, fps).
+
+**Acceptance.** Static screen: near-zero payload after the first frame. Typing/mouse motion: small region updates and visibly higher fps. First frame/resize/refresh: full frame, no tearing. Fallback to full frame whenever the diff is ambiguous. Verified against a real Windows viewer and a 4K desktop.
+
+**Risks.** Exact rectangle pixel order on the Windows side; tile boundary artifacts (mitigate with a 1-pixel overlap or aligned tiles); CPU cost of diffing (measure, and skip diffing above a size threshold); zstd per-rect overhead; undocumented quality semantics. **Effort: M–L, two phases.**
+
+### K2. Move encode/decode and compositing off the session actor / MainActor
+
+**Problem.** Three synchronous costs share the input path:
+- `HostedScreenMessage.fullFrame` (row reversal + zstd, ~32 ms for a 16.6 MB 4K frame) runs inside the host session actor;
+- `MacScreenPixels.composite` (measured 9 ms for this Mac's two-display canvas, 17.8 ms for 4K) runs on the MainActor;
+- the viewer's relay actor decodes a frame (`ModernScreenFrameMessage.decode` + renderer apply) before sending the ACK, so input writes queue behind decode (~10 ms per frame, more under load).
+Measured effect: injected input can be delayed ~20–100 ms while the screen is updating heavily.
+
+**Proposal.**
+1. **Host:** split the pipeline into (a) a MainActor coordinator for permissions, `NSScreen`/display enumeration and ScreenCaptureKit setup, (b) a composite actor that turns captured `CGImage`s into an RGB555 buffer, and (c) a frame-encoder actor that does row reversal, rectangle packing and zstd. The session actor awaits only the final `Data`, keeps at most one frame in flight, and cancels stale work by generation token. Move the previous-frame buffer (K1) into the encoder actor.
+2. **Viewer:** a dedicated decode worker actor with a bounded mailbox (latest frame wins); hand the multipart parts to it, decode/apply there, and send the ACK after successful decode as today (backpressure must not acknowledge undecoded frames). The transport actor must not be occupied by decode, so input writes stay responsive; a separate high-priority path for input writes is acceptable if the transport stays serialized.
+3. **MainActor:** only UI state, display enumeration, SCK stream configuration and permission prompts. Stream output handlers forward frames to the actors.
+4. **Validation:** per-stage diagnostics (capture/composite/encode/decode p50/p95), a synthetic benchmark for a 4K RGB555 frame (target encode < 15 ms), regression tests for one-in-flight ACK, frame sequence ordering and refresh/cancel behavior, and a memory high-water check.
+
+**Risks.** Swift 6 Sendable: `CGImage` is not Sendable (wrap it in a `sending`/boxed transfer with a clear ownership rule); cancellation and actor reentrancy; extra memory for previous+current buffers; keeping the ACK semantics exactly as today. **Effort: M.**
+
+### K3. Host cursor feedback
+
+**Problem.** On macOS 14+ the host configures `SCStreamConfiguration.showsCursor = true`, so the pointer is baked into the captured image at frame rate (lagging by up to one frame interval, and only visible while frames flow). The macOS 12–13 `CGDisplayCreateImage` fallback contains no cursor at all. The host never sends cursor messages, so a viewer cannot draw a live pointer; this is the remaining half of the "two cursors / laggy pointer" finding (I9/H5).
+
+**Proposal.**
+1. **Immediate, protocol-free improvement:** draw the current cursor image (`NSCursor.current`, or the last known system cursor) into the composited surface at the local pointer location on every frame, and set `showsCursor = false` on macOS 14+ so both paths behave identically (no double cursor). This makes the pointer move at frame rate on all supported macOS versions without any peer change.
+2. **Live cursor messages (needs a Windows viewer capture):** reply to the viewer's cursor-position request (command 28) with `CursorMessage.position` (command 5) on pointer moves, and send `CursorMessage.selection`/`shape` (commands 3/4) when `NSCursor.current` changes, using a hash-keyed shape cache. The viewer already decodes these messages; the open question is whether the Windows viewer sends command 28 and accepts these shapes. Capture a real Windows viewer first; until then keep option 1.
+3. **Coordinates:** positions are signed virtual-desktop coordinates before subtracting the origin; the same Int16 clamp warning as V11 applies to very large desktops.
+4. **Files/tests:** new `MacCursorPublisher` (MainActor cursor observation + optional global mouse monitor), host session send path, `CursorMessage` encode tests (there is currently only a decoder), diagnostics (position messages/s, shape changes/s). A cursor-only path must not require Accessibility if global monitoring is not permitted; fall back to the drawn cursor in that case.
+5. **Acceptance:** the pointer follows the local Mac pointer within roughly one frame on macOS 12–14, no double cursor, no crash without permission, I-beam/resize shapes reflected once shape transfer is confirmed.
+
+**Risks:** Windows viewer expectations; Accessibility permission for global mouse monitoring; fidelity of NSCursor→CUR mapping; cost of sending shape messages. **Effort: M (position first, shape later).**
+
 ## Tóm tắt tiếng Việt
 
 Báo cáo này tổng hợp **toàn bộ phát hiện** của hai đợt audit (đa màn hình và tương tác remote), kèm giải pháp và trạng thái:
@@ -167,4 +222,5 @@ Báo cáo này tổng hợp **toàn bộ phát hiện** của hai đợt audit (
 - **Đang mở:** PR **#12** (nút chuyển màn hình cấp 1, chế độ Vừa khung ghi nhớ, tuỳ chọn ẩn/hiện con trỏ remote).
 - **Còn mở, đã có đề xuất:** delta-rectangle frames + tôn trọng quality preset; đưa encode/decode khỏi actor/MainActor; host cursor feedback; quyền Trợ năng/power assertion; emoji/non-BMP; Caps Lock Mac→Windows; Actions 22/40/53; phím đặc biệt; horizontal wheel injection; Ctrl↔Cmd; dead-key Option; ẩn con trỏ local; clipboard paste flush; dọn chat window; cảnh báo Int16; làm mới màn hình.
 - **Kiểm chứng:** 343 test / 27 suite pass (baseline 275/18), build macOS 12 + macOS 11, CI xanh cả 3 job ở cả ba PR; probe vòng lặp encoder↔host và các policy đều đạt.
+- **Ba đề xuất lớn đã được viết chi tiết ở mục K:** (1) partial frames + quality preset (2 pha, ưu tiên bounding-box an toàn trước); (2) đưa composite/encode/decode ra khỏi MainActor/actor, giữ nguyên backpressure ACK; (3) host cursor feedback (vẽ cursor vào frame trước, sau đó gửi CursorMessage khi có capture Windows xác nhận).
 - **Cần Windows UltraViewer thật:** phản ứng với double-click/WM_MOUSEHWHEEL, modifier side, VK_PACKET surrogate, quality command, heartbeat khi màn hình tĩnh, không gian toạ độ monitor.
