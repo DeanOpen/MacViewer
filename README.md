@@ -10,7 +10,7 @@
 
 ### [Tải về MacViewer cho macOS](https://github.com/DeanOpen/MacViewer/releases/latest)
 
-Bản mới nhất, macOS 12 trở lên
+Bản mới nhất, macOS 12 trở lên · [LinuxViewer cho Linux](#linux-linuxviewer-thử-nghiệm)
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -207,6 +207,9 @@ curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest
 sudo apt install ./linuxviewer.deb
 linuxviewer                       # mở cửa sổ kết nối
 ```
+
+`apt` tự tải các thư viện phụ thuộc (ALSA, PipeWire) từ kho phần mềm có sẵn trên
+Ubuntu 22.04+, Debian 12+ và Mint 21+. Nếu báo thiếu gói, chạy `sudo apt install -f`.
 
 **Hoặc bản nén chạy ngay** (mọi bản Linux, không cần cài):
 

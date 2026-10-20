@@ -10,7 +10,7 @@
 
 ### [Download MacViewer for macOS](https://github.com/DeanOpen/MacViewer/releases/latest)
 
-Latest version, macOS 12 or later
+Latest version, macOS 12 or later · [LinuxViewer for Linux](#linux-linuxviewer-experimental)
 
 [![CI](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DeanOpen/MacViewer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DeanOpen/MacViewer?sort=semver)](https://github.com/DeanOpen/MacViewer/releases/latest)
@@ -211,6 +211,10 @@ curl -L -o linuxviewer.deb https://github.com/DeanOpen/MacViewer/releases/latest
 sudo apt install ./linuxviewer.deb
 linuxviewer                       # open the connect window
 ```
+
+`apt` pulls the dependencies (ALSA, PipeWire) from the normal repositories; they
+ship with Ubuntu 22.04+, Debian 12+ and Mint 21+. If it ever reports a missing
+dependency, run `sudo apt install -f`.
 
 **Or the portable tarball** (any distro, no install):
 
