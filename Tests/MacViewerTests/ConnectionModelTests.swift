@@ -627,6 +627,75 @@ struct ConnectionModelTests {
         #expect(monitors[1].menuPositionSuffix == " · (0, 0)")
     }
 
+    @Test("Monitor cycling releases input, updates the crop and persists per partner")
+    func monitorCyclingPersists() async throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let adapter = ControlledAdapter()
+        let model = ConnectionModel(adapter: adapter, defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        model.partnerID = "123456789"; model.password = "PIN"; model.connect()
+        try await settle { adapter.events.count == 1 }
+        let monitors = try RemoteControlCommands.monitors(from: Data("0:0:2:1|2:0:4:1|".utf8))
+        adapter.events[0].yield(.connected(RemoteSessionInfo(partnerID: "123456789", allowsRemoteInput: true,
+                                                            monitors: monitors)))
+        adapter.events[0].yield(.frame(try makeFrame(width: 4, height: 1)))
+        try await settle { model.displayedFrame != nil }
+        model.setControlEnabled(true)
+        #expect(model.selectedMonitor == 0)
+
+        model.selectNextMonitor()
+        #expect(model.selectedMonitor == 1)
+        #expect(defaults.integer(forKey: ConnectionModel.selectedMonitorKey(for: "123456789")) == 1)
+        try await settle { adapter.inputs.contains(.releaseAll) }
+        model.selectNextMonitor()
+        #expect(model.selectedMonitor == 2)
+        #expect(model.displayedFrame?.image.width == 2) // crop follows the selection
+        model.selectNextMonitor()
+        #expect(model.selectedMonitor == 0)
+        model.selectPreviousMonitor()
+        #expect(model.selectedMonitor == 2)
+        model.selectPreviousMonitor()
+        #expect(model.selectedMonitor == 1)
+
+        // A single monitor has nothing to cycle.
+        adapter.events[0].yield(.screenGeometryChanged(RemoteSessionInfo(partnerID: "123456789",
+                                                                        monitors: Array(monitors.prefix(1)))))
+        try await settle { model.remoteInfo?.monitors.count == 1 }
+        model.selectNextMonitor()
+        #expect(model.selectedMonitor == 1) // unchanged; the model guards before cycling
+        model.disconnect()
+    }
+
+    @Test("Remote cursor visibility defaults on and persists across model instances")
+    func cursorVisibilityPersists() throws {
+        let defaults = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuite(defaults)) }
+        let first = ConnectionModel(adapter: ControlledAdapter(), defaults: defaults,
+                                    credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        #expect(first.showRemoteCursor)
+        first.setShowRemoteCursor(false)
+        #expect(!first.showRemoteCursor)
+        #expect(defaults.bool(forKey: ConnectionModel.showRemoteCursorKey) == false)
+
+        let second = ConnectionModel(adapter: ControlledAdapter(), defaults: defaults,
+                                     credentials: ModelTestCredentials(), audioPlayer: ModelTestAudio())
+        #expect(!second.showRemoteCursor)
+        second.setShowRemoteCursor(true)
+        #expect(defaults.bool(forKey: ConnectionModel.showRemoteCursorKey))
+    }
+
+    @Test("Display scale persistence uses stable raw values")
+    func displayScaleStorage() {
+        #expect(RemoteDisplayScale.storageKey == "MacViewer.remoteDisplayScale")
+        #expect(RemoteDisplayScale.fit.rawValue == "fit")
+        #expect(RemoteDisplayScale.actualSize.rawValue == "actualSize")
+        #expect(RemoteDisplayScale(rawValue: "fit") == .fit)
+        #expect(RemoteDisplayScale(rawValue: "actualSize") == .actualSize)
+        #expect(RemoteDisplayScale.fit.shortTitle == "Fit")
+        #expect(RemoteDisplayScale.actualSize.shortTitle == "Actual")
+    }
+
     @Test("A delayed audio enable cannot override a later disable, and PCM is gated by active playback")
     func audioRevisionAndPlayback() async throws {
         let defaults = try isolatedDefaults()

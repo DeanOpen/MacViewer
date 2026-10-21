@@ -32,6 +32,9 @@ struct RemoteScreenView: NSViewRepresentable {
     let inputEnabled: Bool
     /// At Actual size the surrounding ScrollView owns plain wheel gestures.
     let localPanEnabled: Bool
+    /// ⌃⌥⌘1…9 while the screen has focus: switch to that remote monitor without
+    /// forwarding the chord to Windows. The owner validates the index.
+    let onSessionDigit: ((Int) -> Void)?
     let onInput: (RemoteInput) -> Void
 
     func makeNSView(context: Context) -> RemoteScreenNSView {
@@ -45,6 +48,7 @@ struct RemoteScreenView: NSViewRepresentable {
         view.scrollSensitivity = scrollSensitivity
         view.inputEnabled = inputEnabled
         view.localPanEnabled = localPanEnabled
+        view.onSessionDigit = onSessionDigit
         view.onInput = onInput
         view.needsDisplay = true
         // Deliberately no focus claim here: updateNSView runs on unrelated
@@ -76,6 +80,8 @@ final class RemoteScreenNSView: NSView {
         }
     }
     var onInput: ((RemoteInput) -> Void)?
+    /// ⌃⌥⌘1…9 monitor selection; nil when the owner does not support it.
+    var onSessionDigit: ((Int) -> Void)?
     var remoteCursor: RemoteCursorPresenter.Snapshot? { feed?.cursor }
     private let cursorLayer = CALayer()
     /// Shows the input method's uncommitted text (e.g. Telex "việ") locally;
@@ -318,12 +324,31 @@ final class RemoteScreenNSView: NSView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Direct monitor digits are session-local: consume them before the
+        // forwarding guards so ⌃⌥⌘1…9 never reaches the Windows peer. Only while
+        // the remote screen owns the keyboard — the chat composer or a toolbar
+        // control keeps its own shortcuts.
+        if window?.firstResponder === self,
+           let digit = Self.sessionDigit(for: event), let onSessionDigit {
+            onSessionDigit(digit)
+            return true
+        }
         guard inputEnabled, window?.firstResponder === self,
               event.type == .keyDown, event.modifierFlags.contains(.command), !keepsLocally(event) else {
             return super.performKeyEquivalent(with: event)
         }
         keyDown(with: event)
         return true
+    }
+
+    /// The digit of a ⌃⌥⌘1…9 chord, or nil for every other event.
+    static func sessionDigit(for event: NSEvent) -> Int? {
+        guard event.type == .keyDown else { return nil }
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard flags == [.command, .control, .option] else { return nil }
+        guard let text = event.charactersIgnoringModifiers, text.count == 1,
+              let digit = Int(text), (1...9).contains(digit) else { return nil }
+        return digit
     }
 
     override func flagsChanged(with event: NSEvent) {

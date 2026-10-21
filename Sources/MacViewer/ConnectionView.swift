@@ -11,7 +11,7 @@ struct ConnectionView: View {
     @ObservedObject var remoteCapture: RemoteCaptureController
     @ObservedObject var updater: UpdateChecker
     @ObservedObject var agents: AgentBridge
-    @State private var remoteDisplayScale: RemoteDisplayScale = .fit
+    @AppStorage(RemoteDisplayScale.storageKey) private var remoteDisplayScaleRaw = RemoteDisplayScale.fit.rawValue
     @State private var remoteImageQuality: RemoteImageQuality = .automatic
     @State private var showSession = false
     @AppStorage(RemoteSessionCommands.toolbarKey) private var showSessionToolbar = true
@@ -605,7 +605,7 @@ struct ConnectionView: View {
                 isConnected: model.phase == .connected,
                 allowsControl: model.remoteInfo?.allowsRemoteInput == true,
                 controlEnabled: Binding(get: { model.controlEnabled }, set: { model.setControlEnabled($0) }),
-                displayScale: $remoteDisplayScale, smoothScaling: $smoothScreen,
+                displayScale: displayScaleBinding, smoothScaling: $smoothScreen,
                 forwardShortcuts: Binding(get: { forwardShortcuts }, set: { model.releaseRemoteInput(); forwardShortcuts = $0 }),
                 imageQuality: $remoteImageQuality,
                 tools: model.tools, capture: remoteCapture, hasImage: model.displayedSize != nil,
@@ -640,7 +640,8 @@ struct ConnectionView: View {
                     if let size = model.displayedSize, model.phase == .connected {
                         RemoteScreenViewport(feed: model.screenFeed, imageSize: size, displayScale: remoteDisplayScale,
                                              smoothScaling: smoothScreen, scrollSensitivity: scrollSensitivity,
-                                             inputEnabled: model.controlEnabled, onInput: model.send)
+                                             inputEnabled: model.controlEnabled,
+                                             onSessionDigit: selectMonitorFromDigit, onInput: model.send)
                     } else {
                         VStack(spacing: 16) {
                             ProgressView().controlSize(.large)
@@ -736,6 +737,24 @@ struct ConnectionView: View {
             else { Button("Enable", action: action).buttonStyle(.bordered).controlSize(.small) }
         }
     }
+    private var remoteDisplayScale: RemoteDisplayScale {
+        RemoteDisplayScale(rawValue: remoteDisplayScaleRaw) ?? .fit
+    }
+
+    private var displayScaleBinding: Binding<RemoteDisplayScale> {
+        Binding(get: { remoteDisplayScale },
+                set: { remoteDisplayScaleRaw = $0.rawValue })
+    }
+
+    /// ⌃⌥⌘1…9 from the remote screen view: select that monitor locally, but only
+    /// when the peer really has several and the index exists.
+    private func selectMonitorFromDigit(_ index: Int) {
+        guard model.phase == .connected,
+              let monitors = model.remoteInfo?.monitors, monitors.count > 1,
+              monitors.contains(where: { $0.index == index }) else { return }
+        model.selectMonitor(index)
+    }
+
     private func errorLabel(_ text: String) -> some View {
         Label(L(text), systemImage: "exclamationmark.circle.fill")
             .font(.callout).foregroundColor(.red).fixedSize(horizontal: false, vertical: true)

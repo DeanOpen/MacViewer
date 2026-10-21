@@ -319,6 +319,13 @@ struct RemoteSessionCommands: Commands {
     @AppStorage(toolbarKey) private var showToolbar = true
     @AppStorage(chatSidebarKey) private var showChat = false
     @AppStorage(RemoteScreenNSView.forwardShortcutsKey) private var forwardShortcuts = true
+    @AppStorage(RemoteDisplayScale.storageKey) private var displayScaleRaw = RemoteDisplayScale.fit.rawValue
+
+    private var displayScale: RemoteDisplayScale {
+        RemoteDisplayScale(rawValue: displayScaleRaw) ?? .fit
+    }
+
+    private var monitorCount: Int { model.remoteInfo?.monitors.count ?? 0 }
 
     var body: some Commands {
         CommandGroup(before: .toolbar) {
@@ -335,6 +342,26 @@ struct RemoteSessionCommands: Commands {
             Toggle(L("Send Keyboard Shortcuts to Other Computer"), isOn: Binding(
                 get: { forwardShortcuts }, set: { model.releaseRemoteInput(); forwardShortcuts = $0 }))
                 .keyboardShortcut("k", modifiers: [.control, .option, .command])
+            Divider()
+            Button(L("All monitors")) { model.selectMonitor(0) }
+                .keyboardShortcut("0", modifiers: [.control, .option, .command])
+                .disabled(monitorCount < 2)
+            Button(L("Next monitor")) { model.selectNextMonitor() }
+                .keyboardShortcut("]", modifiers: [.control, .option, .command])
+                .disabled(monitorCount < 2)
+            Button(L("Previous monitor")) { model.selectPreviousMonitor() }
+                .keyboardShortcut("[", modifiers: [.control, .option, .command])
+                .disabled(monitorCount < 2)
+            Divider()
+            Toggle(L("Fit to window"), isOn: Binding(
+                get: { displayScale == .fit },
+                set: { displayScaleRaw = ($0 ? RemoteDisplayScale.fit : RemoteDisplayScale.actualSize).rawValue }))
+                .keyboardShortcut("f", modifiers: [.control, .option, .command])
+                .disabled(model.phase != .connected)
+            Toggle(L(model.showRemoteCursor ? "Show remote cursor" : "Hide remote cursor"), isOn: Binding(
+                get: { model.showRemoteCursor }, set: { model.setShowRemoteCursor($0) }))
+                .keyboardShortcut("p", modifiers: [.control, .option, .command])
+                .disabled(model.phase != .connected)
             Divider()
             Button(L("Toggle Full Screen")) { model.releaseRemoteInput(); NSApp.keyWindow?.toggleFullScreen(nil) }
                 .keyboardShortcut("f", modifiers: [.control, .command])

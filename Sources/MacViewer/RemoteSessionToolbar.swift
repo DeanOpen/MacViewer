@@ -4,8 +4,12 @@ import UltraViewerProtocol
 
 enum RemoteDisplayScale: String, CaseIterable, Identifiable {
     case fit, actualSize
+    /// Persisted per Mac: how the remote image fills the session window.
+    static let storageKey = "MacViewer.remoteDisplayScale"
     var id: Self { self }
     var title: String { self == .fit ? "Fit to window" : "Actual size (100%)" }
+    /// Short toolbar label; the full title stays in menus and help text.
+    var shortTitle: String { self == .fit ? "Fit" : "Actual" }
 }
 
 enum RemoteImageQuality: String, CaseIterable, Identifiable {
@@ -82,7 +86,10 @@ struct RemoteSessionToolbar: View {
             }.frame(maxWidth: 130, alignment: .leading)
             Spacer(minLength: 4)
             actionsMenu
+            monitorMenu
             configurationMenu
+            fitToggle
+            cursorToggle
             captureMenu
             SessionClipboardButton(tools: tools)
             SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput,
@@ -155,17 +162,64 @@ struct RemoteSessionToolbar: View {
         .fixedSize().disabled(!isConnected)
     }
 
-    private var configurationMenu: some View {
-        AppKitMenuButton { menu in
-            if let selectMonitor = callbacks.selectMonitor, !callbacks.monitors.isEmpty {
+    /// First-class monitor switcher; only multi-monitor peers show it. The
+    /// current choice is the button label, so it is visible without opening a
+    /// submenu. Selection itself stays local (crop), no wire command is sent.
+    @ViewBuilder
+    private var monitorMenu: some View {
+        if callbacks.monitors.count > 1, let selectMonitor = callbacks.selectMonitor {
+            AppKitMenuButton { menu in
                 menu.picker("Monitor",
                             options: [(L("All monitors"), 0)] + callbacks.monitors.map {
                                 (LF("Monitor %ld · %ld × %ld", $0.index, $0.width, $0.height)
                                     + $0.menuPositionSuffix, $0.index)
                             },
                             selection: callbacks.selectedMonitor, select: selectMonitor)
-                menu.separator()
+            } label: {
+                Label(monitorLabel, systemImage: "display")
             }
+            .fixedSize()
+            .help(monitorLabel)
+            .accessibilityLabel(monitorLabel)
+        }
+    }
+
+    private var monitorLabel: String {
+        callbacks.selectedMonitor == 0
+            ? L("All monitors")
+            : LF("Monitor %ld", callbacks.selectedMonitor)
+    }
+
+    /// Compact Fit ↔ Actual size switch. Persisted through the displayScale binding.
+    private var fitToggle: some View {
+        Button {
+            displayScale = displayScale == .fit ? .actualSize : .fit
+        } label: {
+            Label(L(displayScale.shortTitle),
+                  systemImage: displayScale == .fit ? "arrow.up.left.and.arrow.down.right" : "plus.magnifyingglass")
+        }
+        .fixedSize()
+        .disabled(!isConnected)
+        .help(L(displayScale == .fit ? "Fit to window" : "Actual size (100%)"))
+        .accessibilityLabel(L(displayScale == .fit ? "Fit to window" : "Actual size (100%)"))
+    }
+
+    /// Shows/hides the remote cursor overlay; the preference is persisted in
+    /// ConnectionModel and also drives command 28 for new sessions.
+    private var cursorToggle: some View {
+        Button {
+            callbacks.setShowRemoteCursor?(!callbacks.showRemoteCursor)
+        } label: {
+            // eye/eye.slash exist on every supported macOS (SF Symbols 1/2).
+            Image(systemName: callbacks.showRemoteCursor ? "eye" : "eye.slash")
+        }
+        .disabled(!isConnected || callbacks.setShowRemoteCursor == nil)
+        .help(L(callbacks.showRemoteCursor ? "Hide remote cursor" : "Show remote cursor"))
+        .accessibilityLabel(L(callbacks.showRemoteCursor ? "Hide remote cursor" : "Show remote cursor"))
+    }
+
+    private var configurationMenu: some View {
+        AppKitMenuButton { menu in
             menu.picker("Display size", options: RemoteDisplayScale.allCases.map { (L($0.title), $0) },
                         selection: displayScale) { displayScale = $0 }
             menu.toggle("Smooth scaling", isOn: smoothScaling) { smoothScaling = $0 }
@@ -279,6 +333,7 @@ struct RemoteScreenViewport: View {
     let smoothScaling: Bool
     let scrollSensitivity: Double
     let inputEnabled: Bool
+    let onSessionDigit: ((Int) -> Void)?
     let onInput: (RemoteInput) -> Void
     @Environment(\.displayScale) private var backingScale
 
@@ -301,7 +356,8 @@ struct RemoteScreenViewport: View {
     private var screen: some View {
         RemoteScreenView(feed: feed, smoothScaling: smoothScaling,
                          scrollSensitivity: scrollSensitivity, inputEnabled: inputEnabled,
-                         localPanEnabled: displayScale == .actualSize, onInput: onInput)
+                         localPanEnabled: displayScale == .actualSize,
+                         onSessionDigit: onSessionDigit, onInput: onInput)
     }
 }
 
