@@ -4,7 +4,7 @@
 use zstd_safe::{get_error_name, DCtx, DParameter, InBuffer, OutBuffer, ResetDirective};
 
 /// The trained dictionary the Windows desktop loads (UltraViewerScreenDictionary).
-pub static SCREEN_DICTIONARY: &[u8] = include_bytes!("../../../Sources/UltraViewerProtocol/Resources/8bit.dat");
+pub static SCREEN_DICTIONARY: &[u8] = include_bytes!("../../assets/8bit.dat");
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZstdError {

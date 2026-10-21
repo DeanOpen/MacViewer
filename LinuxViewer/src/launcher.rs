@@ -51,6 +51,7 @@ pub enum LauncherAction {
 enum Widget {
     Id,
     Password,
+    Remember,
     Connect,
     Recent(usize),
     Share,
@@ -103,6 +104,10 @@ pub struct Launcher {
     status: String,
     status_error: bool,
     recents: Vec<String>,
+    /// Save the password in the keyring once a connection succeeds.
+    remember: bool,
+    /// ID and password of the connection in progress, saved or forgotten on Connected.
+    pending: Option<(String, String)>,
     host: Option<Host>,
     host_status: String,
     host_generation: u64,
@@ -146,6 +151,12 @@ fn remember(recents: &mut Vec<String>, id: &str) {
     recents.retain(|r| r != id);
     recents.insert(0, id.to_string());
     recents.truncate(MAX_RECENTS);
+}
+
+// Saved passwords live in the desktop keyring, one entry per partner ID. Keyring
+// calls can block on D-Bus or an unlock prompt, so they run off the UI thread.
+fn keyring_entry(id: &str) -> Option<keyring::Entry> {
+    keyring::Entry::new("linuxviewer", id).ok()
 }
 
 /// Replace punctuation font8x8 lacks with ASCII look-alikes.
@@ -237,7 +248,7 @@ impl Launcher {
         Launcher {
             proxy, window: None, surface: None, id: recents.first().cloned().unwrap_or_default(), password: String::new(),
             focus: Widget::Id, status: "Enter your partner's ID and password.".into(), status_error: false, recents,
-            host: None, host_status: String::new(), host_generation: 0, hits: Vec::new(), pointer: None,
+            remember: true, pending: None, host: None, host_status: String::new(), host_generation: 0, hits: Vec::new(), pointer: None,
             modifiers: ModifiersState::empty(), clipboard: None, viewer_active: false,
         }
     }
@@ -257,6 +268,7 @@ impl Launcher {
             .map_err(|e| format!("Could not draw to the window: {e}"))?;
         if !self.id.is_empty() {
             self.focus = Widget::Password;
+            self.load_saved_password();
         }
         self.window = Some(window);
         self.surface = Some(surface);
@@ -280,13 +292,46 @@ impl Launcher {
     pub fn client_progress(&mut self, event: &ClientEvent) {
         match event {
             ClientEvent::Status(s) => self.set_status(s.clone(), false),
-            ClientEvent::Connected { width, height } => self.set_status(format!("Connected ({width}×{height})."), false),
+            ClientEvent::Connected { width, height } => {
+                if let Some((id, password)) = self.pending.take() {
+                    let remember = self.remember;
+                    std::thread::spawn(move || {
+                        let Some(entry) = keyring_entry(&id) else { return };
+                        let result = if remember { entry.set_password(&password) } else { entry.delete_credential() };
+                        match result {
+                            Ok(()) | Err(keyring::Error::NoEntry) => {}
+                            Err(e) => eprintln!("linuxviewer: keyring: {e}"),
+                        }
+                    });
+                }
+                self.set_status(format!("Connected ({width}×{height})."), false)
+            }
             _ => {}
+        }
+    }
+
+    /// Look up the keyring password for the current ID; it arrives as UiEvent::SavedPassword.
+    fn load_saved_password(&self) {
+        let (id, proxy) = (self.id.clone(), self.proxy.clone());
+        std::thread::spawn(move || {
+            if let Some(password) = keyring_entry(&id).and_then(|e| e.get_password().ok()) {
+                let _ = proxy.send_event(UiEvent::SavedPassword(id, password));
+            }
+        });
+    }
+
+    pub fn saved_password(&mut self, id: String, password: String) {
+        // Ignore a late answer if the user moved on or already typed a password.
+        if self.id == id && self.password.is_empty() && !self.viewer_active {
+            self.password = password;
+            self.remember = true;
+            self.set_status("Saved password filled in.", false);
         }
     }
 
     pub fn session_ended(&mut self, reason: Option<String>) {
         self.viewer_active = false;
+        self.pending = None;
         match reason {
             Some(r) => self.set_status(r, true),
             None => self.set_status("Session ended.", false),
@@ -318,6 +363,7 @@ impl Launcher {
             let _ = std::fs::write(&p, self.recents.join("\n") + "\n");
         }
         self.viewer_active = true;
+        self.pending = Some((id.clone(), self.password.clone()));
         self.set_status(format!("Connecting to {}…", group_id(&id)), false);
         LauncherAction::Connect { id, password: self.password.clone() }
     }
@@ -469,11 +515,16 @@ impl Launcher {
             Widget::Id | Widget::Password | Widget::Connect => return self.connect(),
             Widget::Recent(i) => {
                 if let Some(id) = self.recents.get(i) {
+                    if *id != self.id {
+                        self.password.clear();
+                    }
                     self.id = id.clone();
                     self.focus = Widget::Password;
                     self.set_status("Enter the partner's password.", false);
+                    self.load_saved_password();
                 }
             }
+            Widget::Remember => self.remember = !self.remember,
             Widget::Share => self.start_hosting(),
             Widget::StopSharing => self.stop_hosting(),
             Widget::Approve(n) => {
@@ -625,6 +676,15 @@ impl Launcher {
             hits.push((widget, r));
             y += field_h + 4 * s;
         }
+        let bx = Rect { x, y, w: line - 2 * s, h: line - 2 * s };
+        c.fill(bx, FIELD);
+        c.stroke(bx, if focus == Widget::Remember { ACCENT } else { BORDER }, if focus == Widget::Remember { s.max(2) } else { (s / 2).max(1) });
+        if self.remember {
+            c.fill(Rect { x: bx.x + 2 * s, y: bx.y + 2 * s, w: bx.w - 4 * s, h: bx.h - 4 * s }, ACCENT);
+        }
+        let tw = c.text(x + line + s, y + s, "Remember password (system keyring)", TEXT, k);
+        hits.push((Widget::Remember, Rect { x, y, w: line + s + tw, h: line }));
+        y += line + 4 * s;
         let button = |c: &mut Canvas, hits: &mut Vec<(Widget, Rect)>, x: i32, y: i32, label: &str, w: Widget, primary: bool, enabled: bool| -> i32 {
             let bw = (label.chars().count() as i32 + 4) * 8 * s;
             let r = Rect { x, y, w: bw, h: field_h };
