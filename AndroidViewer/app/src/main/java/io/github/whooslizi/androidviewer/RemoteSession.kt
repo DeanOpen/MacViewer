@@ -1,5 +1,6 @@
 package io.github.whooslizi.androidviewer
 
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
@@ -21,10 +22,12 @@ data class RemotePointer(val bitmap: Bitmap, val hotX: Int, val hotY: Int, val x
  */
 class RemoteSession(
     private val handle: Long,
+    /** In the app language, for the status line. */
+    private val text: Resources,
     private val onConnected: () -> Unit,
     private val onClosed: (String) -> Unit,
 ) {
-    var status by mutableStateOf("Connecting…")
+    var status by mutableStateOf(text.getString(R.string.connecting))
         private set
     var viewOnly by mutableStateOf(false)
         private set
@@ -43,7 +46,6 @@ class RemoteSession(
     /** Top-left of the remote desktop in Windows coordinates (multi-monitor). */
     private var originX = 0
     private var originY = 0
-    /** The pointer shape last fetched from the core, and for which shape key. */
     private var shapeBitmap: Bitmap? = null
     private var shapeKey: String? = null
     private var hotX = 0
@@ -90,7 +92,7 @@ class RemoteSession(
                 // A re-init without monitor metadata keeps the previous list.
                 if (event.monitors.isNotEmpty()) monitors = event.monitors
                 if (monitor >= monitors.size) monitor = -1
-                status = "Connected ${event.width}×${event.height}"
+                status = text.getString(R.string.connected_size, event.width, event.height)
                 copyFrame()
                 if (!connectedOnce) {
                     connectedOnce = true
@@ -99,7 +101,7 @@ class RemoteSession(
             }
             is SessionEvent.Cursor -> updatePointer(event)
             is SessionEvent.ViewOnly -> {
-                // As in LinuxViewer: forget held keys and buttons, so the encoder matches Windows again.
+                // Forget held keys and buttons, so the encoder matches Windows again.
                 if (event.on && !freed) Native.releaseAll(handle)
                 viewOnly = event.on
             }

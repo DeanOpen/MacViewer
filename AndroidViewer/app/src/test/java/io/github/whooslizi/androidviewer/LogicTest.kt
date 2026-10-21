@@ -17,7 +17,7 @@ class LogicTest {
         assertEquals(SessionEvent.Connected(800, 600, 0, 0, emptyList()), SessionEvent.parse("connected\t800\t600\t0\t0\t"))
         assertEquals(SessionEvent.Cursor(10, -5, "123"), SessionEvent.parse("cursor\t10\t-5\t123"))
         assertEquals(SessionEvent.Cursor(null, null, null), SessionEvent.parse("cursor\t-\t-\t-"))
-        assertEquals(SessionEvent.Closed("The session ended."), SessionEvent.parse("closed\t"))
+        assertEquals(SessionEvent.Closed(""), SessionEvent.parse("closed\t"))
         assertEquals(SessionEvent.Status("a b"), SessionEvent.parse("status\ta b"))
         assertNull(SessionEvent.parse("chat\thi"))
     }

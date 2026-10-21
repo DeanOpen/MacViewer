@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -27,9 +28,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /** "123456789" → "123 456 789", as UltraViewer shows IDs. */
 fun groupId(id: String): String = id.reversed().chunked(3).joinToString(" ").reversed()
@@ -41,22 +47,30 @@ fun ConnectScreen(model: ViewerViewModel) {
     var id by rememberSaveable { mutableStateOf(recents.firstOrNull().orEmpty()) }
     var password by remember { mutableStateOf(credentials.password(id).orEmpty()) }
     var rememberPassword by rememberSaveable { mutableStateOf(true) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     val digits = id.filter(Char::isDigit)
 
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("AndroidViewer", style = MaterialTheme.typography.headlineMedium)
-        Text("Control a computer running UltraViewer.", style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.app_name), Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
+            val settings = stringResource(R.string.settings)
+            // U+FE0E: text presentation, not the emoji.
+            IconButton(onClick = { showSettings = true }, Modifier.semantics { contentDescription = settings }) {
+                Text("\u2699\uFE0E", Modifier.clearAndSetSemantics {}, fontSize = 24.sp)
+            }
+        }
+        Text(stringResource(R.string.tagline), style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = id, onValueChange = { v -> id = v.filter { it.isDigit() || it == ' ' } },
-            label = { Text("Partner ID") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.partner_id)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
         OutlinedTextField(
             value = password, onValueChange = { password = it },
-            label = { Text("Password") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.password)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
@@ -65,18 +79,18 @@ fun ConnectScreen(model: ViewerViewModel) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(checked = rememberPassword, onCheckedChange = { rememberPassword = it })
-            Text("Remember password on this phone")
+            Text(stringResource(R.string.remember_password))
         }
         Button(
             onClick = { model.connect(digits, password, rememberPassword) },
             enabled = !model.connecting && digits.isNotEmpty() && password.isNotEmpty(),
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Connect") }
+        ) { Text(stringResource(R.string.connect)) }
         model.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
         if (recents.isNotEmpty()) {
             HorizontalDivider()
-            Text("Recent", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.recent), style = MaterialTheme.typography.titleSmall)
             for (recent in recents) {
                 TextButton(onClick = {
                     id = recent
@@ -85,4 +99,5 @@ fun ConnectScreen(model: ViewerViewModel) {
             }
         }
     }
+    if (showSettings) SettingsDialog(onDismiss = { showSettings = false })
 }

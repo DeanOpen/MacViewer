@@ -12,8 +12,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Recent partner IDs, and their passwords encrypted with an AES key that never
- * leaves the Android Keystore (MacViewer: Keychain, LinuxViewer: keyring).
- * Backups are off in the manifest, so neither leaves the phone.
+ * leaves the Android Keystore. Backups are off in the manifest.
  */
 class CredentialStore(context: Context) {
     private val prefs = context.getSharedPreferences("partners", Context.MODE_PRIVATE)

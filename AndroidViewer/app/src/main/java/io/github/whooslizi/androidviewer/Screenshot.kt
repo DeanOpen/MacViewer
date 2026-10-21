@@ -14,15 +14,15 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 /**
- * Saves [region] of the remote screen as a PNG in Pictures/AndroidViewer
- * (MacViewer: "Save full screen as PNG"). The copy is taken now, on the main
- * thread; encoding runs in the background and [done] gets a message.
+ * Saves [region] of the remote screen as a PNG in Pictures/AndroidViewer. The copy
+ * is taken now, on the main thread; encoding runs in the background and [done] gets a message.
  */
 fun saveScreenshot(context: Context, screen: Bitmap, region: IntRect, done: (String) -> Unit) {
     val copy = Bitmap.createBitmap(screen, region.left, region.top, region.width, region.height)
     val name = "AndroidViewer " + SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US).format(Date()) + ".png"
     // The application context: the Activity may be gone before encoding finishes.
     val app = context.applicationContext
+    val text = app.localized()
     val resolver = app.contentResolver
     thread {
         var uri: Uri? = null
@@ -40,10 +40,10 @@ fun saveScreenshot(context: Context, screen: Bitmap, region: IntRect, done: (Str
                 check(out != null && copy.compress(Bitmap.CompressFormat.PNG, 100, out)) { "could not write the image" }
             }
             resolver.update(target, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
-            "Saved to Pictures/AndroidViewer."
+            text.getString(R.string.screenshot_saved)
         }.getOrElse { error ->
             uri?.let { resolver.delete(it, null, null) }
-            "Could not save the screenshot: ${error.message}"
+            text.getString(R.string.screenshot_failed, error.message)
         }
         if (copy !== screen) copy.recycle()
         Handler(app.mainLooper).post { done(message) }

@@ -2,7 +2,7 @@ package io.github.whooslizi.androidviewer
 
 import android.graphics.Bitmap
 
-/** The Rust bridge in core/src/lib.rs (LinuxViewer's UltraViewer protocol core). */
+/** The Rust bridge in core/src/lib.rs. */
 object Native {
     init {
         System.loadLibrary("androidviewer")
@@ -38,7 +38,6 @@ object Native {
 
     external fun releaseAll(handle: Long)
 
-    /** See [RemoteCommand] for the names. */
     external fun command(handle: Long, name: String, value: Int)
 
     external fun disconnect(handle: Long)
@@ -46,10 +45,7 @@ object Native {
     external fun free(handle: Long)
 }
 
-/**
- * Commands understood by Native.command, mirroring MacViewer's Actions and
- * Configuration menus. As there, actions need control; quality also works view-only.
- */
+/** Actions need control; image quality also works view-only. */
 enum class RemoteCommand(val wire: String, val needsControl: Boolean) {
     CtrlAltDelete("ctrl-alt-delete", true),
     Lock("lock", true),

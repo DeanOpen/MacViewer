@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -63,12 +64,12 @@ fun ViewerScreen(session: RemoteSession) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (session.viewOnly) "View only" else session.status,
+                if (session.viewOnly) stringResource(R.string.view_only) else session.status,
                 Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.bodyMedium,
             )
-            TextButton(onClick = { keyboard = !keyboard }) { Text(if (keyboard) "Hide keys" else "Keyboard") }
-            TextButton(onClick = { zoom = 1f; pan = Offset.Zero }) { Text("Fit") }
-            TextButton(onClick = { session.disconnect() }) { Text("Disconnect") }
+            TextButton(onClick = { keyboard = !keyboard }) { Text(stringResource(if (keyboard) R.string.hide_keys else R.string.keyboard)) }
+            TextButton(onClick = { zoom = 1f; pan = Offset.Zero }) { Text(stringResource(R.string.fit)) }
+            TextButton(onClick = { session.disconnect() }) { Text(stringResource(R.string.disconnect)) }
             SessionMenu(session, showPointer, onShowPointer = { showPointer = it }, onScreenshot = {
                 val b = session.bitmap
                 if (b != null && view != null) saveScreenshot(context, b, view) {

@@ -30,7 +30,6 @@ data class ViewTransform(
         )
     }
 
-    /** Canvas point to window coordinates. */
     fun toWindow(x: Float, y: Float): Offset = Offset(x - view.left, y - view.top) * scale + topLeft
 
     /**

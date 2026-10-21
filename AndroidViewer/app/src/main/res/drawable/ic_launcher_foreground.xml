@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Two monitors from MacViewer's scripts/make_app_icon.swift, in adaptive-icon form. -->
+<!-- Ported from MacViewer's scripts/make_app_icon.swift. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="1024" android:viewportHeight="1024">

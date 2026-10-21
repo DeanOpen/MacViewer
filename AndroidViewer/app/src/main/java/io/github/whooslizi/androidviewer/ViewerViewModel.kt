@@ -33,8 +33,9 @@ class ViewerViewModel(app: Application) : AndroidViewModel(app) {
     fun connect(id: String, password: String, remember: Boolean) {
         if (connecting || session != null) return
         connecting = true
-        message = "Connecting…"
         val app = getApplication<Application>()
+        val text = app.localized().resources
+        message = text.getString(R.string.connecting)
         val metrics = app.resources.displayMetrics
         viewModelScope.launch {
             // Not cancellable: a handle that came back must be closed and freed, even if the screen is gone.
@@ -44,16 +45,17 @@ class ViewerViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             connecting = false
-            result.onFailure { message = it.message ?: "Could not connect." }
+            result.onFailure { message = it.message ?: text.getString(R.string.could_not_connect) }
             result.onSuccess { handle ->
                 message = null
                 session = RemoteSession(
                     handle,
-                    // Like LinuxViewer: remember only what actually connected.
+                    text,
+                    // Remember only what actually connected.
                     onConnected = { rememberPartner(id, password, remember) },
                     onClosed = { reason ->
                         session = null
-                        message = reason
+                        message = reason.ifEmpty { text.getString(R.string.session_ended) }
                     },
                 ).also {
                     it.start()

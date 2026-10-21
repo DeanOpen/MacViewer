@@ -13,13 +13,11 @@ android {
         applicationId = "io.github.whooslizi.androidviewer"
         minSdk = 29
         targetSdk = 35
-        // CI passes the run number and tag; local builds stay at 1 / 0.1.0.
         versionCode = System.getenv("ANDROID_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("ANDROID_VERSION_NAME") ?: "0.1.0"
     }
 
-    // Release signing comes from the environment (GitHub secrets in CI, see README).
-    // Without it, release builds fall back to the debug key so they still install.
+    // Without the signing variables (see README), release builds use the debug key so they still install.
     val keystore = System.getenv("ANDROID_KEYSTORE_FILE")?.let(::file)?.takeIf { it.exists() }
     signingConfigs {
         if (keystore != null) create("release") {
@@ -46,11 +44,12 @@ android {
     buildFeatures {
         compose = true
     }
+    // The language can be picked in the app, so every device needs every translation.
+    bundle { language { enableSplit = false } }
 }
 
-// Builds ../core (the Rust protocol bridge) into src/main/jniLibs with cargo-ndk.
 // Needs rustup's cargo with the Android targets and cargo-ndk (see README).
-// Inputs and outputs let Gradle skip it, and the repackaging after it, when nothing changed.
+// Declared inputs and outputs let Gradle skip it, and the repackaging after it, when nothing changed.
 val cargoBuild by tasks.registering(Exec::class) {
     val rustupCargo = File(System.getProperty("user.home"), ".cargo/bin/cargo")
     val linuxViewer = rootProject.file("../LinuxViewer")

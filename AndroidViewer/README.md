@@ -31,6 +31,9 @@ The **⋮** menu, as in MacViewer:
 - **Image quality:** Automatic, Prefer speed (less mobile data), Prefer image quality.
 - **Show remote wallpaper** and **Show remote pointer**.
 
+The app is in English and Vietnamese and follows the phone's language; **⚙**
+on the connect screen picks one instead.
+
 Successful connections are listed under **Recent**. With **Remember password**
 ticked, the password is stored encrypted with a key kept in the Android
 Keystore; app backups are off, so it never leaves the phone.

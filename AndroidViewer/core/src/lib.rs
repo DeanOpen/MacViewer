@@ -48,7 +48,6 @@ fn with_encoder(handle: jlong, f: impl FnOnce(&mut Encoder) -> Vec<Vec<u8>>) {
     }
 }
 
-/// Exported as Java_io_github_whooslizi_androidviewer_Native_<name>.
 macro_rules! jni_fn {
     ($name:ident($($arg:ident: $ty:ty),*) $(-> $ret:ty)? $body:block) => {
         #[export_name = concat!("Java_io_github_whooslizi_androidviewer_Native_", stringify!($name))]
@@ -108,7 +107,7 @@ fn next_event(s: &Session, timeout: Duration) -> Option<String> {
                 let origin = init.map(|i| i.origin()).unwrap_or((0, 0));
                 let monitors: Vec<String> = init.map(|i| i.monitors()).unwrap_or_default().iter()
                     .map(|m| format!("{},{},{},{}", m[0], m[1], m[2], m[3])).collect();
-                // ConnectionModel: ask for cursor positions after every init.
+                // 28|||1 asks for cursor positions; MacViewer's ConnectionModel also sends it after every init.
                 s.session.send_command(b"28|||1".to_vec(), false);
                 format!("connected\t{width}\t{height}\t{}\t{}\t{}", origin.0, origin.1, monitors.join(";"))
             }
@@ -243,7 +242,6 @@ jni_fn!(key(env: JNIEnv, _c: JClass, handle: jlong, name: JString, pressed: jboo
     with_encoder(handle, |e| e.key(code, pressed == JNI_TRUE, None));
 });
 
-// Release every held key and mouse button.
 jni_fn!(releaseAll(_e: JNIEnv, _c: JClass, handle: jlong) {
     with_encoder(handle, |e| e.release_all());
 });

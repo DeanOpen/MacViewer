@@ -33,7 +33,7 @@ sealed interface SessionEvent {
                 "frame" -> Frame
                 "cursor" -> Cursor(at(1).toIntOrNull(), at(2).toIntOrNull(), at(3).takeIf { it != "-" && it.isNotEmpty() })
                 "viewonly" -> ViewOnly(at(1) == "1")
-                "closed" -> Closed(at(1).ifEmpty { "The session ended." })
+                "closed" -> Closed(at(1))
                 else -> null
             }
         }

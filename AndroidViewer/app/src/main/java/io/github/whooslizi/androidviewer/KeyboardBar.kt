@@ -31,7 +31,6 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
-/** Sticky modifiers: one tap holds it for the next key or typed letter. */
 private val MODIFIERS = listOf("Ctrl" to "ControlLeft", "Alt" to "AltLeft", "Win" to "SuperLeft", "Shift" to "ShiftLeft")
 private val KEYS = listOf(
     "Esc" to "Escape", "Tab" to "Tab", "←" to "ArrowLeft", "↑" to "ArrowUp", "↓" to "ArrowDown", "→" to "ArrowRight",
@@ -41,7 +40,6 @@ private val KEYS = listOf(
 /** The hidden field always starts with this, so Backspace on an "empty" field is still seen. */
 private const val SENTINEL = " "
 
-/** The key row plus the phone keyboard, which opens with it. */
 @Composable
 fun KeyboardBar(session: RemoteSession) {
     val held = remember { mutableStateMapOf<String, Boolean>() }

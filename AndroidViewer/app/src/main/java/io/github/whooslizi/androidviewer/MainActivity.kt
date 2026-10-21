@@ -1,5 +1,6 @@
 package io.github.whooslizi.androidviewer
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -16,6 +17,8 @@ import androidx.compose.ui.Modifier
 
 class MainActivity : ComponentActivity() {
     private val model: ViewerViewModel by viewModels()
+
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(base.localized())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
