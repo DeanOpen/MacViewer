@@ -6,3 +6,6 @@ build/
 .idea/
 *.iml
 .DS_Store
+# Signing keys: never commit
+*.jks
+*.keystore

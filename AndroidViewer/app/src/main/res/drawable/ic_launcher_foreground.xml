@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two monitors from MacViewer's scripts/make_app_icon.swift, in adaptive-icon form. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <group android:scaleX="0.8" android:scaleY="0.8" android:pivotX="512" android:pivotY="512"
+        android:translateX="1.5" android:translateY="0.0">
+        <path android:pathData="M194,244 H753 A28,28 0 0 1 781,272 V606 A28,28 0 0 1 753,634 H194 A28,28 0 0 1 166,606 V272 A28,28 0 0 1 194,244 Z" android:strokeColor="#FFFFFF" android:strokeWidth="34" android:strokeLineJoin="round" />
+        <path android:pathData="M420,649 h75 v73 h-75 Z M335,712 h245 v32 h-245 Z M645,772 h58 v32 h-58 Z M580,799 h190 v28 h-190 Z" android:fillColor="#FFFFFF" />
+        <path android:pathData="M519,494 H833 A22,22 0 0 1 855,516 V732 A22,22 0 0 1 833,754 H519 A22,22 0 0 1 497,732 V516 A22,22 0 0 1 519,494 Z" android:fillColor="#147DF7" android:strokeColor="#FFFFFF" android:strokeWidth="34" android:strokeLineJoin="round" />
+    </group>
+</vector>

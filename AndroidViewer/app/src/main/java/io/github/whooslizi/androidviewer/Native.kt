@@ -1,19 +1,27 @@
 package io.github.whooslizi.androidviewer
 
+import android.graphics.Bitmap
+
 /** The Rust bridge in core/src/lib.rs (LinuxViewer's UltraViewer protocol core). */
 object Native {
     init {
         System.loadLibrary("androidviewer")
     }
 
-    /** Starts connecting; throws IllegalStateException with a readable message on bad input. */
-    external fun connect(configDir: String, id: String, password: String, width: Int, height: Int): Long
+    /**
+     * Starts connecting; throws IllegalStateException with a readable message on bad input.
+     * [name] is what the Windows side shows for this phone; [width]×[height] is its screen.
+     */
+    external fun connect(configDir: String, name: String, id: String, password: String, width: Int, height: Int): Long
 
-    /** Next event as tab-separated text, or null after [timeoutMs]. See lib.rs for the formats. */
+    /** Next event as tab-separated text (see [SessionEvent.parse]), or null after [timeoutMs]. */
     external fun nextEvent(handle: Long, timeoutMs: Int): String?
 
-    /** Copies the screen as ARGB into [pixels] (width*height); false if the size differs. */
-    external fun copyFrame(handle: Long, pixels: IntArray): Boolean
+    /** Draws the screen into [target], a mutable ARGB_8888 bitmap of its size; false if not possible. */
+    external fun copyFrame(handle: Long, target: Bitmap): Boolean
+
+    /** The pointer shape as [width, height, hotX, hotY, ARGB pixels…]. */
+    external fun cursorShape(handle: Long): IntArray?
 
     external fun pointer(handle: Long, x: Int, y: Int)
 
@@ -28,7 +36,26 @@ object Native {
     /** [name] is a physical key such as "Escape", "ControlLeft" or "ArrowUp". */
     external fun key(handle: Long, name: String, pressed: Boolean)
 
+    external fun releaseAll(handle: Long)
+
+    /** See [RemoteCommand] for the names. */
+    external fun command(handle: Long, name: String, value: Int)
+
     external fun disconnect(handle: Long)
 
     external fun free(handle: Long)
+}
+
+/**
+ * Commands understood by Native.command, mirroring MacViewer's Actions and
+ * Configuration menus. As there, actions need control; quality also works view-only.
+ */
+enum class RemoteCommand(val wire: String, val needsControl: Boolean) {
+    CtrlAltDelete("ctrl-alt-delete", true),
+    Lock("lock", true),
+    Restart("restart", true),
+    QualityAutomatic("quality-automatic", false),
+    QualitySpeed("quality-speed", false),
+    QualityBest("quality-quality", false),
+    Wallpaper("wallpaper", true),
 }
