@@ -929,6 +929,8 @@ fn new_viewer(profile: Profile, partner_id: &str, password: &str, base: ConnectO
 pub enum UiEvent {
     Client(u64, ClientEvent),
     Host(u64, HostLine),
+    /// A keyring password for (partner ID, password), looked up off the UI thread.
+    SavedPassword(String, String),
 }
 
 /// Owns the event loop's windows: the optional launcher and at most one viewer.
@@ -1021,6 +1023,11 @@ impl ApplicationHandler<UiEvent> for Shell {
             UiEvent::Host(generation, line) => {
                 if let Some(l) = self.launcher.as_mut() {
                     l.host_line(generation, line);
+                }
+            }
+            UiEvent::SavedPassword(id, password) => {
+                if let Some(l) = self.launcher.as_mut() {
+                    l.saved_password(id, password);
                 }
             }
         }
