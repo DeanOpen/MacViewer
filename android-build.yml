@@ -1,0 +1,105 @@
+name: Android
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["android-v*"]
+    paths: ["AndroidViewer/**", "LinuxViewer/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["AndroidViewer/**", "LinuxViewer/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: "28.2.13676358"
+
+jobs:
+  build:
+    name: Test & build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # for the Release on android-v* tags
+    defaults:
+      run:
+        working-directory: AndroidViewer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: AndroidViewer/core
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Rust core tests
+        working-directory: LinuxViewer
+        run: cargo test --lib --no-default-features --locked
+
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; the APK is signed with a throwaway debug key and won't update an installed copy."
+          fi
+
+      - name: Version
+        run: |
+          echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+          if [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
+            echo "ANDROID_VERSION_NAME=${GITHUB_REF_NAME#android-v}" >> "$GITHUB_ENV"
+          else
+            echo "ANDROID_VERSION_NAME=0.1.0-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and test
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew testDebugUnitTest assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "androidviewer-$ANDROID_VERSION_NAME.apk"
+          for apksigner in "$ANDROID_HOME"/build-tools/*/apksigner; do :; done # newest
+          "$apksigner" verify --print-certs "androidviewer-$ANDROID_VERSION_NAME.apk" | head -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: androidviewer-apk
+          path: AndroidViewer/androidviewer-*.apk
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AndroidViewer ${{ env.ANDROID_VERSION_NAME }}
+          files: AndroidViewer/androidviewer-*.apk
