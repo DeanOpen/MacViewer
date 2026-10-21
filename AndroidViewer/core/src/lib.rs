@@ -7,13 +7,19 @@ use jni::objects::JObject;
 use jni::objects::{JClass, JString};
 #[cfg(target_os = "android")]
 use jni::sys::JNI_FALSE;
+use jni::objects::JShortArray;
 use jni::sys::{jboolean, jint, jintArray, jlong, jstring, JNI_TRUE};
 use jni::JNIEnv;
+use linuxviewer::audio::{self, AudioMessage, G722Decoder};
+use linuxviewer::chat::ChatEvent;
 use linuxviewer::client::{self, ClientEvent, ClientSession, ConnectOptions};
+use linuxviewer::files;
 use linuxviewer::control::{self, Action, QualityPreset};
 use linuxviewer::cursor::{self, CursorState};
 use linuxviewer::input::{self, Encoder, KeyCode};
 use linuxviewer::profile::Profile;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Mutex, Once};
 use std::time::Duration;
@@ -25,7 +31,15 @@ struct Session {
     /// Created on the first Connected, once the partner version is known.
     encoder: Mutex<Option<Encoder>>,
     cursor: Mutex<CursorState>,
+    sound: AtomicBool,
+    /// One decoder per session: G.722 is stateful across packets.
+    decoder: Mutex<G722Decoder>,
+    /// 48 kHz stereo samples waiting for `readAudio`.
+    pcm: Mutex<VecDeque<i16>>,
 }
+
+/// 250 ms of 48 kHz stereo; older audio is dropped so sound never lags behind the screen.
+const MAX_QUEUED_SAMPLES: usize = 24_000;
 
 fn session<'a>(handle: jlong) -> &'a Session {
     // Safety: Kotlin passes only handles from `connect` that it has not freed.
@@ -74,7 +88,10 @@ jni_fn!(connect(env: JNIEnv, _c: JClass, config_dir: JString, name: JString, id:
         let (tx, rx) = mpsc::channel();
         let options = ConnectOptions { local_screen: Some((width as u32, height as u32)), ..Default::default() };
         let session = client::connect_with(&profile, &id, &password, options, Box::new(move |e| { let _ = tx.send(e); }))?;
-        Ok(Session { session, events: Mutex::new(rx), encoder: Mutex::new(None), cursor: Mutex::default() })
+        Ok(Session {
+            session, events: Mutex::new(rx), encoder: Mutex::new(None), cursor: Mutex::default(),
+            sound: AtomicBool::new(false), decoder: Mutex::new(G722Decoder::new()), pcm: Mutex::default(),
+        })
     });
     match result {
         Ok(s) => Box::into_raw(Box::new(s)) as jlong,
@@ -87,48 +104,80 @@ jni_fn!(connect(env: JNIEnv, _c: JClass, config_dir: JString, name: JString, id:
 
 /// The next event as tab-separated text, or null after `timeout_ms`:
 /// status\tTEXT · connected\tW\tH\tORIGIN_X\tORIGIN_Y\tMONITORS (l,t,r,b;…) · frame
-/// · cursor\tX|-\tY|-\tSHAPE (hash, or - for the arrow) · viewonly\t0|1 · closed\tREASON
+/// · cursor\tX|-\tY|-\tSHAPE (hash, or - for the arrow) · viewonly\t0|1 · audio (call readAudio)
+/// · chat\tTEXT · typing\t0|1 · clipboard\tTEXT · fileoffer\tID\tSIZE\tNAME · fileprogress\tID\tBYTES
+/// · filedone\tID · filecanceled\tID · filefailed\tID\tREASON · closed\tREASON
+/// TEXT is last on its line and may itself contain tabs.
 fn next_event(s: &Session, timeout: Duration) -> Option<String> {
-    loop {
-        let event = match s.events.lock().unwrap().recv_timeout(timeout) {
-            Ok(e) => e,
-            Err(RecvTimeoutError::Timeout) => return None,
-            Err(RecvTimeoutError::Disconnected) => return Some("closed\tDisconnected.".into()),
-        };
-        return Some(match event {
-            ClientEvent::Status(t) => format!("status\t{t}"),
-            ClientEvent::Connected { width, height } => {
-                let mut enc = s.encoder.lock().unwrap();
-                if enc.is_none() {
-                    *enc = Some(Encoder::new(input::supports_binary_keyboard(&s.session.partner_version())));
-                }
-                let screen = s.session.screen.lock().unwrap();
-                let init = screen.as_ref().map(|r| r.init());
-                let origin = init.map(|i| i.origin()).unwrap_or((0, 0));
-                let monitors: Vec<String> = init.map(|i| i.monitors()).unwrap_or_default().iter()
-                    .map(|m| format!("{},{},{},{}", m[0], m[1], m[2], m[3])).collect();
-                // 28|||1 asks for cursor positions; MacViewer's ConnectionModel also sends it after every init.
-                s.session.send_command(b"28|||1".to_vec(), false);
-                format!("connected\t{width}\t{height}\t{}\t{}\t{}", origin.0, origin.1, monitors.join(";"))
+    let event = match s.events.lock().unwrap().recv_timeout(timeout) {
+        Ok(e) => e,
+        Err(RecvTimeoutError::Timeout) => return None,
+        Err(RecvTimeoutError::Disconnected) => return Some("closed\tDisconnected.".into()),
+    };
+    Some(match event {
+        ClientEvent::Status(t) => format!("status\t{t}"),
+        ClientEvent::Connected { width, height } => {
+            let mut enc = s.encoder.lock().unwrap();
+            if enc.is_none() {
+                *enc = Some(Encoder::new(input::supports_binary_keyboard(&s.session.partner_version())));
             }
-            ClientEvent::FrameReady => "frame".into(),
-            ClientEvent::Cursor(c) => {
-                let mut cur = s.cursor.lock().unwrap();
-                if let Some(request) = cur.apply(c) {
-                    s.session.send_input(request);
-                }
-                let (x, y) = cur.position.map_or(("-".into(), "-".into()), |(x, y)| (x.to_string(), y.to_string()));
-                let shape = match (cur.selected(), cur.image()) {
-                    (Some(h), Some(_)) => h.to_string(),
-                    _ => "-".into(),
-                };
-                format!("cursor\t{x}\t{y}\t{shape}")
+            let screen = s.session.screen.lock().unwrap();
+            let init = screen.as_ref().map(|r| r.init());
+            let origin = init.map(|i| i.origin()).unwrap_or((0, 0));
+            let monitors: Vec<String> = init.map(|i| i.monitors()).unwrap_or_default().iter()
+                .map(|m| format!("{},{},{},{}", m[0], m[1], m[2], m[3])).collect();
+            // 28|||1 asks for cursor positions; MacViewer's ConnectionModel also sends it after every init.
+            s.session.send_command(b"28|||1".to_vec(), false);
+            if s.sound.load(Ordering::SeqCst) {
+                s.session.send_command(audio::sound_request(true), true);
             }
-            ClientEvent::ViewOnly(v) => format!("viewonly\t{}", v as u8),
-            ClientEvent::Closed(reason) => format!("closed\t{reason}"),
-            // shortcut: chat, audio, clipboard and files are dropped; add them as the app grows.
-            _ => continue,
-        });
+            format!("connected\t{width}\t{height}\t{}\t{}\t{}", origin.0, origin.1, monitors.join(";"))
+        }
+        ClientEvent::FrameReady => "frame".into(),
+        ClientEvent::Cursor(c) => {
+            let mut cur = s.cursor.lock().unwrap();
+            if let Some(request) = cur.apply(c) {
+                s.session.send_input(request);
+            }
+            let (x, y) = cur.position.map_or(("-".into(), "-".into()), |(x, y)| (x.to_string(), y.to_string()));
+            let shape = match (cur.selected(), cur.image()) {
+                (Some(h), Some(_)) => h.to_string(),
+                _ => "-".into(),
+            };
+            format!("cursor\t{x}\t{y}\t{shape}")
+        }
+        ClientEvent::ViewOnly(v) => format!("viewonly\t{}", v as u8),
+        ClientEvent::Audio(m) => {
+            let samples = match m {
+                AudioMessage::Encoded(bytes) => s.decoder.lock().unwrap().decode(&bytes).unwrap_or_default(),
+                AudioMessage::Silence(bytes) => vec![0; bytes / 2],
+            };
+            if !s.sound.load(Ordering::SeqCst) {
+                return None;
+            }
+            let mut q = s.pcm.lock().unwrap();
+            q.extend(samples);
+            let excess = q.len().saturating_sub(MAX_QUEUED_SAMPLES);
+            q.drain(..excess);
+            "audio".into()
+        }
+        ClientEvent::Chat(ChatEvent::Message(t)) => format!("chat\t{t}"),
+        ClientEvent::Chat(ChatEvent::Typing(on)) => format!("typing\t{}", on as u8),
+        ClientEvent::Clipboard(t) => format!("clipboard\t{t}"),
+        ClientEvent::File(e) => match e {
+            files::Event::Offer(o) => format!("fileoffer\t{}\t{}\t{}", o.transfer_id, o.size, o.file_name),
+            files::Event::Progress(id, n) => format!("fileprogress\t{id}\t{n}"),
+            files::Event::Completed(id) => format!("filedone\t{id}"),
+            files::Event::Canceled(id) => format!("filecanceled\t{id}"),
+            files::Event::Failed(id, reason) => format!("filefailed\t{id}\t{reason}"),
+        },
+        ClientEvent::Closed(reason) => format!("closed\t{reason}"),
+    })
+}
+
+fn throw(env: &mut JNIEnv, result: linuxviewer::wire::Result<()>) {
+    if let Err(e) = result {
+        let _ = env.throw_new("java/lang/IllegalStateException", e.to_string());
     }
 }
 
@@ -258,12 +307,77 @@ jni_fn!(command(env: JNIEnv, _c: JClass, handle: jlong, name: JString, value: ji
         "quality-speed" => control::quality_preset(QualityPreset::Speed).to_vec(),
         "quality-quality" => control::quality_preset(QualityPreset::Quality).to_vec(),
         "wallpaper" => vec![control::wallpaper(value != 0)],
+        "sound" => {
+            let s = session(handle);
+            s.sound.store(value != 0, Ordering::SeqCst);
+            s.pcm.lock().unwrap().clear();
+            vec![(audio::sound_request(value != 0), true)]
+        }
+        "clipboard-sharing" => {
+            session(handle).session.set_clipboard_sharing(value != 0);
+            return;
+        }
         _ => return,
     };
     let s = session(handle);
     for (payload, flag) in commands {
         s.session.send_command(payload, flag);
     }
+});
+
+// Moves queued sound into `target` (48 kHz stereo PCM); returns the sample count.
+jni_fn!(readAudio(env: JNIEnv, _c: JClass, handle: jlong, target: JShortArray) -> jint {
+    let Ok(len) = env.get_array_length(&target) else { return 0 };
+    let samples: Vec<i16> = {
+        let mut q = session(handle).pcm.lock().unwrap();
+        let n = q.len().min(len as usize);
+        q.drain(..n).collect()
+    };
+    if env.set_short_array_region(&target, 0, &samples).is_err() {
+        return 0;
+    }
+    samples.len() as jint
+});
+
+jni_fn!(sendChat(env: JNIEnv, _c: JClass, handle: jlong, text: JString) {
+    let mut env = env;
+    let text = string(&mut env, &text);
+    let result = session(handle).session.send_chat(&text);
+    throw(&mut env, result);
+});
+
+jni_fn!(sendClipboard(env: JNIEnv, _c: JClass, handle: jlong, text: JString) {
+    let mut env = env;
+    let text = string(&mut env, &text);
+    let result = session(handle).session.send_clipboard(&text);
+    throw(&mut env, result);
+});
+
+// Offers the file at `path`; returns its transfer id for the file events.
+jni_fn!(sendFile(env: JNIEnv, _c: JClass, handle: jlong, path: JString) -> jstring {
+    let mut env = env;
+    let path = string(&mut env, &path);
+    match session(handle).session.send_file(std::path::Path::new(&path)) {
+        Ok(offer) => env.new_string(offer.transfer_id).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(e) => {
+            throw(&mut env, Err(e));
+            std::ptr::null_mut()
+        }
+    }
+});
+
+// Accepts an offer into `path`, which must not exist yet.
+jni_fn!(acceptFile(env: JNIEnv, _c: JClass, handle: jlong, id: JString, path: JString) {
+    let mut env = env;
+    let (id, path) = (string(&mut env, &id), string(&mut env, &path));
+    let result = session(handle).session.accept_file(&id, std::path::Path::new(&path));
+    throw(&mut env, result);
+});
+
+jni_fn!(cancelFile(env: JNIEnv, _c: JClass, handle: jlong, id: JString) {
+    let mut env = env;
+    let id = string(&mut env, &id);
+    let _ = session(handle).session.cancel_file(&id);
 });
 
 jni_fn!(disconnect(_e: JNIEnv, _c: JClass, handle: jlong) {

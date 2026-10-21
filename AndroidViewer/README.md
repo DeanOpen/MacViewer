@@ -17,6 +17,10 @@ and Jetpack Compose app.
 | Two-finger swipe | Scroll wheel (when not zoomed in) |
 | Pinch / two-finger drag | Zoom and pan the view; **Fit** resets it |
 
+**Trackpad mode** (in the ⋮ menu) is for precise pointing: one finger moves the
+pointer by how far it travels, wherever it touches. Tap clicks where the pointer
+is, long press right-clicks, and tap then touch-and-drag holds the left button.
+
 **Keyboard** opens the phone keyboard and a key row: Esc, Tab, arrows, Del,
 Home/End, PgUp/PgDn and F1–F12. Ctrl, Alt, Win and Shift are sticky: tap one,
 then a key or letter (Ctrl, then C sends Ctrl+C). Typed text is sent as Unicode,
@@ -27,9 +31,14 @@ The **⋮** menu, as in MacViewer:
 - **Actions:** Send Ctrl-Alt-Delete, Lock remote screen, Restart remote computer
   (asks first), Release pressed keys and buttons, Save screenshot (to
   Pictures/AndroidViewer).
+- **Share:** chat, send a file, send the phone's clipboard, receive the
+  computer's clipboard, play the computer's sound.
 - **Monitor:** show all monitors or one of them (shown when there are several).
 - **Image quality:** Automatic, Prefer speed (less mobile data), Prefer image quality.
-- **Show remote wallpaper** and **Show remote pointer**.
+- **Show remote wallpaper**, **Show remote pointer** and **Trackpad mode**.
+
+Files from the computer are offered first, then saved to Download/AndroidViewer.
+Sent files show their progress under the toolbar, with ✕ to cancel.
 
 The app is in English and Vietnamese and follows the phone's language; **⚙**
 on the connect screen picks one instead.
@@ -86,9 +95,7 @@ gh secret set ANDROID_KEY_PASSWORD
 Never commit the `.jks` file. Without the secrets, CI signs with a throwaway
 debug key: the APK installs, but cannot update a copy signed with another key.
 
-## Not done yet
+## Limits
 
-- Sound, chat, clipboard and file transfer (the Rust core already has them).
-- A trackpad mode for precise pointing.
-- Same limits as LinuxViewer: Windows UltraViewer 6.0 or later in 16-bit
-  colour mode, ASCII passwords, relay or LAN direct connections.
+Same as LinuxViewer: Windows UltraViewer 6.0 or later in 16-bit colour mode,
+ASCII passwords, relay or LAN direct connections.

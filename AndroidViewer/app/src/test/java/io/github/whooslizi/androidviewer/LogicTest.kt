@@ -19,7 +19,29 @@ class LogicTest {
         assertEquals(SessionEvent.Cursor(null, null, null), SessionEvent.parse("cursor\t-\t-\t-"))
         assertEquals(SessionEvent.Closed(""), SessionEvent.parse("closed\t"))
         assertEquals(SessionEvent.Status("a b"), SessionEvent.parse("status\ta b"))
-        assertNull(SessionEvent.parse("chat\thi"))
+        assertEquals(SessionEvent.Chat("a\tb"), SessionEvent.parse("chat\ta\tb"))
+        assertEquals(SessionEvent.Clipboard(""), SessionEvent.parse("clipboard\t"))
+        assertEquals(SessionEvent.FileOffer("T1", 2048, "report final.pdf"), SessionEvent.parse("fileoffer\tT1\t2048\treport final.pdf"))
+        assertEquals(SessionEvent.FileProgress("T1", 1024), SessionEvent.parse("fileprogress\tT1\t1024"))
+        assertEquals(SessionEvent.FileFailed("T1", "disk full"), SessionEvent.parse("filefailed\tT1\tdisk full"))
+        assertEquals(SessionEvent.Audio, SessionEvent.parse("audio"))
+        assertNull(SessionEvent.parse("unknown\tx"))
+    }
+
+    @Test
+    fun keepsOfferedNamesInsideTheFolder() {
+        assertEquals("a.txt", safeFileName("a.txt"))
+        assertEquals("evil.txt", safeFileName("../../evil.txt"))
+        assertEquals("b.txt", safeFileName("C:\\Users\\b.txt"))
+        assertEquals("file", safeFileName(".."))
+        assertEquals("file", safeFileName("dir/"))
+    }
+
+    @Test
+    fun trackpadMovesByTravelAndStaysOnScreen() {
+        val view = IntRect(0, 0, 1000, 500)
+        assertEquals(Offset(120f, 100f), movedPointer(Offset(100f, 100f), Offset(10f, 0f), 0.5f, view))
+        assertEquals(Offset(999f, 0f), movedPointer(Offset(990f, 10f), Offset(100f, -100f), 1f, view))
     }
 
     @Test

@@ -7,7 +7,10 @@ import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.toOffset
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Pixels of two-finger movement per wheel step. */
 private const val SCROLL_STEP_PX = 40f
@@ -22,20 +25,32 @@ private const val DOUBLE_TAP_SLOP = 3
  * Tap = left click (a quick second tap reuses the first spot, so Windows sees
  * a double-click), long press = right click, one-finger drag = left drag.
  * Two fingers pinch-zoom and pan; when not zoomed they scroll the wheel.
- * [toCanvas] maps a touch to remote canvas pixels.
+ * In [trackpad] mode one finger moves the pointer instead (see [trackpadGesture]).
  */
 suspend fun PointerInputScope.remoteTouchGestures(
     session: RemoteSession,
-    toCanvas: (Offset) -> IntOffset,
+    transform: () -> ViewTransform?,
     onPinch: (factor: Float, centroid: Offset, move: Offset) -> Unit,
     isZoomed: () -> Boolean,
+    trackpad: () -> Boolean,
 ) {
     var lastTap = 0L
     var lastTapTouch = Offset.Zero
     var lastTapAt = IntOffset.Zero
+    var cursor: Offset? = null
+    fun toCanvas(p: Offset) = transform()?.toCanvas(p) ?: IntOffset.Zero
     awaitEachGesture {
         val down = awaitFirstDown()
-        when (classify(down)) {
+        val gesture = classify(down)
+        val t = transform()
+        if (trackpad() && t != null && gesture != Gesture.TwoFingers) {
+            val start = cursor ?: session.pointer?.let { Offset(it.x.toFloat(), it.y.toFloat()) } ?: t.view.center.toOffset()
+            val tapThenDrag = down.uptimeMillis - lastTap < viewConfiguration.doubleTapTimeoutMillis
+            cursor = trackpadGesture(session, gesture, down, t, start, tapThenDrag)
+            if (gesture == Gesture.Tap) lastTap = down.uptimeMillis
+            return@awaitEachGesture
+        }
+        when (gesture) {
             Gesture.Tap -> {
                 // Windows needs both clicks of a double-click within a few pixels; fingers aren't that exact.
                 val again = down.uptimeMillis - lastTap < viewConfiguration.doubleTapTimeoutMillis &&
@@ -83,6 +98,49 @@ private suspend fun AwaitPointerEventScope.classify(down: PointerInputChange): G
         @Suppress("UNREACHABLE_CODE")
         null
     } ?: Gesture.LongPress
+
+/**
+ * The pointer follows the finger's travel, not its position: tap clicks where the
+ * pointer is, long press right-clicks, and a tap followed by a drag holds the left
+ * button (its first tap has already clicked). Returns the new pointer position.
+ */
+private suspend fun AwaitPointerEventScope.trackpadGesture(
+    session: RemoteSession,
+    gesture: Gesture,
+    down: PointerInputChange,
+    t: ViewTransform,
+    start: Offset,
+    tapThenDrag: Boolean,
+): Offset {
+    var at = start
+    fun spot() = IntOffset(at.x.roundToInt(), at.y.roundToInt())
+    when (gesture) {
+        Gesture.Tap -> session.click(0, spot().x, spot().y)
+        Gesture.LongPress -> {
+            session.click(1, spot().x, spot().y)
+            while (awaitPointerEvent().changes.any { it.pressed }) Unit
+        }
+        Gesture.Drag -> {
+            if (tapThenDrag) session.button(0, true, spot().x, spot().y)
+            while (true) {
+                val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                if (c == null || !c.pressed) break
+                at = movedPointer(at, c.position - c.previousPosition, t.scale, t.view)
+                session.pointer(spot().x, spot().y)
+                c.consume()
+            }
+            if (tapThenDrag) session.button(0, false, spot().x, spot().y)
+        }
+        Gesture.TwoFingers -> Unit
+    }
+    return at
+}
+
+/** [at] moved by a finger's on-screen [travel], kept inside [view]. */
+fun movedPointer(at: Offset, travel: Offset, scale: Float, view: IntRect): Offset = Offset(
+    (at.x + travel.x / scale).coerceIn(view.left.toFloat(), view.right - 1f),
+    (at.y + travel.y / scale).coerceIn(view.top.toFloat(), view.bottom - 1f),
+)
 
 enum class TwoFingerMode { Pinch, Scroll }
 

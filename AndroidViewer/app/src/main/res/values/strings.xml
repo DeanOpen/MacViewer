@@ -41,4 +41,27 @@
     <string name="language">Language</string>
     <string name="system_language">System language</string>
     <string name="close">Close</string>
+    <string name="chat">Chat</string>
+    <string name="chat_unread">Chat (%1$d)</string>
+    <string name="chat_message">Message</string>
+    <string name="send">Send</string>
+    <string name="partner_typing">Typing…</string>
+    <string name="chat_from_partner">Partner: %1$s</string>
+    <string name="share">Share</string>
+    <string name="play_sound">Play computer sound</string>
+    <string name="receive_clipboard">Receive computer clipboard</string>
+    <string name="send_clipboard">Send phone clipboard</string>
+    <string name="clipboard_sent">Clipboard sent.</string>
+    <string name="clipboard_empty">The phone clipboard has no text.</string>
+    <string name="send_file">Send file…</string>
+    <string name="receive_file_title">Receive this file?</string>
+    <string name="receive_file_message">%1$s (%2$s) from the remote computer, saved to Download/AndroidViewer.</string>
+    <string name="receive">Receive</string>
+    <string name="decline">Decline</string>
+    <string name="file_saved">Saved %1$s to Download/AndroidViewer.</string>
+    <string name="file_sent">Sent %1$s.</string>
+    <string name="file_canceled">%1$s was canceled.</string>
+    <string name="file_failed">%1$s failed: %2$s</string>
+    <string name="cancel_transfer">Cancel %1$s</string>
+    <string name="trackpad_mode">Trackpad mode</string>
 </resources>

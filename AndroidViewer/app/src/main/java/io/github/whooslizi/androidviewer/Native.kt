@@ -40,6 +40,22 @@ object Native {
 
     external fun command(handle: Long, name: String, value: Int)
 
+    /** Moves queued computer sound (48 kHz stereo PCM) into [target]; returns the sample count. */
+    external fun readAudio(handle: Long, target: ShortArray): Int
+
+    // The send and file calls below throw IllegalStateException with a readable message.
+    external fun sendChat(handle: Long, text: String)
+
+    external fun sendClipboard(handle: Long, text: String)
+
+    /** Offers the file at [path]; returns its transfer id. */
+    external fun sendFile(handle: Long, path: String): String
+
+    /** Receives an offered file into [path], which must not exist yet. */
+    external fun acceptFile(handle: Long, id: String, path: String)
+
+    external fun cancelFile(handle: Long, id: String)
+
     external fun disconnect(handle: Long)
 
     external fun free(handle: Long)
@@ -54,4 +70,6 @@ enum class RemoteCommand(val wire: String, val needsControl: Boolean) {
     QualitySpeed("quality-speed", false),
     QualityBest("quality-quality", false),
     Wallpaper("wallpaper", true),
+    Sound("sound", false),
+    ClipboardSharing("clipboard-sharing", false),
 }

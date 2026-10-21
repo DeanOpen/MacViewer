@@ -40,4 +40,27 @@
     <string name="language">Ngôn ngữ</string>
     <string name="system_language">Theo hệ thống</string>
     <string name="close">Đóng</string>
+    <string name="chat">Trò chuyện</string>
+    <string name="chat_unread">Trò chuyện (%1$d)</string>
+    <string name="chat_message">Tin nhắn</string>
+    <string name="send">Gửi</string>
+    <string name="partner_typing">Đang nhập…</string>
+    <string name="chat_from_partner">Đối tác: %1$s</string>
+    <string name="share">Chia sẻ</string>
+    <string name="play_sound">Phát âm thanh máy tính</string>
+    <string name="receive_clipboard">Nhận clipboard từ máy tính</string>
+    <string name="send_clipboard">Gửi clipboard của điện thoại</string>
+    <string name="clipboard_sent">Đã gửi clipboard.</string>
+    <string name="clipboard_empty">Clipboard của điện thoại không có chữ.</string>
+    <string name="send_file">Gửi tệp…</string>
+    <string name="receive_file_title">Nhận tệp này?</string>
+    <string name="receive_file_message">%1$s (%2$s) từ máy tính từ xa, lưu vào Download/AndroidViewer.</string>
+    <string name="receive">Nhận</string>
+    <string name="decline">Từ chối</string>
+    <string name="file_saved">Đã lưu %1$s vào Download/AndroidViewer.</string>
+    <string name="file_sent">Đã gửi %1$s.</string>
+    <string name="file_canceled">Đã hủy %1$s.</string>
+    <string name="file_failed">%1$s thất bại: %2$s</string>
+    <string name="cancel_transfer">Hủy %1$s</string>
+    <string name="trackpad_mode">Chế độ bàn di chuột</string>
 </resources>

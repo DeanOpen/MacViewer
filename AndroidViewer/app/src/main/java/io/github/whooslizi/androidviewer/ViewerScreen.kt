@@ -1,6 +1,8 @@
 package io.github.whooslizi.androidviewer
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -47,11 +49,16 @@ fun ViewerScreen(session: RemoteSession) {
     var window by remember { mutableStateOf(IntSize.Zero) }
     var keyboard by rememberSaveable { mutableStateOf(false) }
     var showPointer by rememberSaveable { mutableStateOf(true) }
+    var trackpad by rememberSaveable { mutableStateOf(false) }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(session::sendFile)
+    }
     val view = session.viewRect()
     val transform = view?.takeIf { window.width > 0 && window.height > 0 }
         ?.let { ViewTransform(window.width.toFloat(), window.height.toFloat(), it, zoom, pan) }
     // The gesture loop outlives recompositions; it must read the latest transform.
     val currentTransform by rememberUpdatedState(transform)
+    val currentTrackpad by rememberUpdatedState(trackpad)
     LaunchedEffect(session.monitor) {
         zoom = 1f
         pan = Offset.Zero
@@ -70,23 +77,30 @@ fun ViewerScreen(session: RemoteSession) {
             TextButton(onClick = { keyboard = !keyboard }) { Text(stringResource(if (keyboard) R.string.hide_keys else R.string.keyboard)) }
             TextButton(onClick = { zoom = 1f; pan = Offset.Zero }) { Text(stringResource(R.string.fit)) }
             TextButton(onClick = { session.disconnect() }) { Text(stringResource(R.string.disconnect)) }
-            SessionMenu(session, showPointer, onShowPointer = { showPointer = it }, onScreenshot = {
-                val b = session.bitmap
-                if (b != null && view != null) saveScreenshot(context, b, view) {
-                    Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-                }
-            })
+            SessionMenu(
+                session, showPointer, onShowPointer = { showPointer = it },
+                trackpad = trackpad, onTrackpad = { trackpad = it },
+                onScreenshot = {
+                    val b = session.bitmap
+                    if (b != null && view != null) saveScreenshot(context, b, view) {
+                        Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onSendFile = { pickFile.launch(arrayOf("*/*")) },
+            )
         }
+        TransfersBar(session)
 
         Box(
             Modifier.weight(1f).fillMaxWidth().onSizeChanged { window = it }.pointerInput(session) {
                 remoteTouchGestures(
                     session,
-                    toCanvas = { p -> currentTransform?.toCanvas(p) ?: IntOffset.Zero },
+                    transform = { currentTransform },
                     onPinch = { factor, centroid, move ->
                         currentTransform?.pinched(factor, centroid, move)?.let { zoom = it.zoom; pan = it.pan }
                     },
                     isZoomed = { zoom > 1f },
+                    trackpad = { currentTrackpad },
                 )
             },
         ) {
@@ -119,6 +133,8 @@ fun ViewerScreen(session: RemoteSession) {
             }
         }
 
+        if (session.chatOpen) ChatPanel(session)
         if (keyboard) KeyboardBar(session)
     }
+    FileOfferDialog(session)
 }

@@ -25,7 +25,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun SessionMenu(session: RemoteSession, showPointer: Boolean, onShowPointer: (Boolean) -> Unit, onScreenshot: () -> Unit) {
+fun SessionMenu(
+    session: RemoteSession,
+    showPointer: Boolean,
+    onShowPointer: (Boolean) -> Unit,
+    trackpad: Boolean,
+    onTrackpad: (Boolean) -> Unit,
+    onScreenshot: () -> Unit,
+    onSendFile: () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     var confirmRestart by remember { mutableStateOf(false) }
     var quality by rememberSaveable { mutableStateOf<RemoteCommand?>(null) }
@@ -54,6 +62,19 @@ fun SessionMenu(session: RemoteSession, showPointer: Boolean, onShowPointer: (Bo
             item(stringResource(R.string.release_all), enabled = control) { session.releaseAll() }
             item(stringResource(R.string.save_screenshot)) { onScreenshot() }
 
+            HorizontalDivider()
+            heading(stringResource(R.string.share))
+            val unread = session.unreadChat
+            item(if (unread > 0) stringResource(R.string.chat_unread, unread) else stringResource(R.string.chat)) {
+                session.showChat(true)
+            }
+            item(stringResource(R.string.send_file)) { onSendFile() }
+            item(stringResource(R.string.send_clipboard)) { session.sendPhoneClipboard() }
+            item(stringResource(R.string.receive_clipboard), checked = session.clipboardSharing) {
+                session.toggleClipboardSharing()
+            }
+            item(stringResource(R.string.play_sound), checked = session.sound) { session.toggleSound() }
+
             if (session.monitors.size > 1) {
                 HorizontalDivider()
                 heading(stringResource(R.string.monitor))
@@ -77,6 +98,7 @@ fun SessionMenu(session: RemoteSession, showPointer: Boolean, onShowPointer: (Bo
                 session.command(RemoteCommand.Wallpaper, if (wallpaper) 1 else 0)
             }
             item(stringResource(R.string.show_pointer), checked = showPointer) { onShowPointer(!showPointer) }
+            item(stringResource(R.string.trackpad_mode), checked = trackpad, enabled = control) { onTrackpad(!trackpad) }
         }
     }
 

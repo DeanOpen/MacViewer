@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.concurrent.thread
 
 /**
  * Owns the connection, so it survives Activity recreation (rotation, dark mode,
@@ -19,6 +20,11 @@ import kotlinx.coroutines.withContext
  */
 class ViewerViewModel(app: Application) : AndroidViewModel(app) {
     val credentials = CredentialStore(app)
+
+    init {
+        // Leftovers of transfers cut off by a crash or a killed process.
+        thread { transferRoot(app).deleteRecursively() }
+    }
 
     var session by mutableStateOf<RemoteSession?>(null)
         private set
@@ -50,6 +56,7 @@ class ViewerViewModel(app: Application) : AndroidViewModel(app) {
                 message = null
                 session = RemoteSession(
                     handle,
+                    app,
                     text,
                     // Remember only what actually connected.
                     onConnected = { rememberPartner(id, password, remember) },
