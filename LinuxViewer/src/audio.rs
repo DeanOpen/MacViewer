@@ -3,7 +3,9 @@
 //! The decoder is the SpanDSP/WebRTC 64 kbit/s G.722 decoder from
 //! ThirdParty/g722, with NAudio's wrapping (not saturating) final QMF output.
 
+#[cfg(feature = "desktop")]
 use std::collections::VecDeque;
+#[cfg(feature = "desktop")]
 use std::sync::{Arc, Mutex};
 
 pub const MAX_ENCODED_PACKET: usize = 64 * 1024;
@@ -230,14 +232,18 @@ impl G722Decoder {
 
 /// Interleaved 48 kHz stereo i16 playback through the default output device.
 /// Keeps at most 250 ms queued, dropping the oldest audio beyond that.
+#[cfg(feature = "desktop")]
 pub struct Player {
     queue: Arc<Mutex<VecDeque<i16>>>,
     _stream: cpal::Stream,
 }
 
+#[cfg(feature = "desktop")]
 const SOURCE_RATE: u32 = 48_000;
+#[cfg(feature = "desktop")]
 const MAX_QUEUED: usize = 12_000 * 2;
 
+#[cfg(feature = "desktop")]
 impl Player {
     pub fn new() -> Result<Self, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

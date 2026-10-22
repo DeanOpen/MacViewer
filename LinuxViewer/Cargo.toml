@@ -12,16 +12,20 @@ path = "src/lib.rs"
 [[bin]]
 name = "linuxviewer"
 path = "src/main.rs"
+required-features = ["desktop"]
 
 [features]
-default = ["wayland"]
+default = ["desktop", "wayland"]
+# The windowed viewer, launcher, hosting, audio output and system clipboard.
+# Without it the crate is just the protocol core (AndroidViewer builds it that way).
+desktop = ["dep:cpal", "dep:font8x8", "dep:rpassword", "dep:softbuffer", "dep:winit", "dep:ctrlc", "dep:arboard", "dep:keyring", "dep:x11rb"]
 # Wayland hosting through xdg-desktop-portal + PipeWire (Linux only).
-wayland = ["dep:ashpd", "dep:pipewire", "dep:tokio"]
+wayland = ["desktop", "dep:ashpd", "dep:pipewire", "dep:tokio"]
 
 [dependencies]
 base64 = "0.22"
-cpal = "0.15"
-font8x8 = "0.3"
+cpal = { version = "0.15", optional = true }
+font8x8 = { version = "0.3", optional = true }
 cbc = { version = "0.1", features = ["alloc"] }
 des = "0.8"
 aes = "0.8"
@@ -30,26 +34,26 @@ jpeg-decoder = { version = "0.3", default-features = false }
 md-5 = "0.10"
 sha1 = "0.10"
 sha2 = "0.10"
-rpassword = "7"
+rpassword = { version = "7", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
-softbuffer = "0.4"
-winit = "0.30"
+softbuffer = { version = "0.4", optional = true }
+winit = { version = "0.30", optional = true }
 zstd-safe = { version = "7", features = ["experimental", "std"] }
 png = "0.17"
-ctrlc = "3"
+ctrlc = { version = "3", optional = true }
 unicode-normalization = "0.1"
-arboard = "3"
+arboard = { version = "3", optional = true }
 # Saved partner passwords (Secret Service on Linux).
-keyring = "4"
+keyring = { version = "4", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { version = "0.13", features = ["xtest", "randr", "shm"] }
+x11rb = { version = "0.13", optional = true, features = ["xtest", "randr", "shm"] }
 libc = "0.2"
 ashpd = { version = "0.13", optional = true, default-features = false, features = ["tokio", "remote_desktop", "screencast"] }
 pipewire = { version = "0.10", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "sync", "time"] }
-arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+arboard = { version = "3", optional = true, default-features = false, features = ["wayland-data-control"] }
 
 [profile.release]
 lto = "thin"

@@ -9,9 +9,12 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+#[cfg(feature = "desktop")]
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
+#[cfg(feature = "desktop")]
 use std::time::Duration;
 
 pub const HELP: &str = "Type a line to chat. /send <path> sends a file, /cancel <id> cancels a transfer, /quit disconnects.";
@@ -98,6 +101,7 @@ fn spawn_stdin(handle: SessionHandle, names: Arc<Mutex<HashMap<String, String>>>
 
 /// Polls the local clipboard once a second and sends changes; applies partner
 /// text sent on the returned channel. Echoes are suppressed both ways.
+#[cfg(feature = "desktop")]
 fn spawn_clipboard(handle: SessionHandle) -> Option<Sender<String>> {
     let (tx, rx) = mpsc::channel::<String>();
     let ready = Arc::new(AtomicBool::new(false));
@@ -142,4 +146,10 @@ fn spawn_clipboard(handle: SessionHandle) -> Option<Sender<String>> {
     });
     let _ = started_rx.recv_timeout(Duration::from_secs(5));
     ready.load(Ordering::SeqCst).then_some(tx)
+}
+
+#[cfg(not(feature = "desktop"))]
+fn spawn_clipboard(_handle: SessionHandle) -> Option<Sender<String>> {
+    eprintln!("linuxviewer: clipboard sharing needs the desktop feature");
+    None
 }

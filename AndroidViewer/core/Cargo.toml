@@ -1,0 +1,16 @@
+[package]
+name = "androidviewer"
+version = "0.1.0"
+edition = "2021"
+description = "JNI bridge from the AndroidViewer Kotlin app to LinuxViewer's UltraViewer protocol core"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+linuxviewer = { path = "../../LinuxViewer", default-features = false }
+
+[profile.release]
+lto = "thin"

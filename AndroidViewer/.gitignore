@@ -1,0 +1,11 @@
+.gradle/
+build/
+/local.properties
+/app/src/main/jniLibs/
+/core/target/
+.idea/
+*.iml
+.DS_Store
+# Signing keys: never commit
+*.jks
+*.keystore

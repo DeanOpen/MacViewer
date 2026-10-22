@@ -864,7 +864,7 @@ impl App {
                     let m = enc.modifiers_state() ^ input::CAPS_LOCK;
                     enc.modifiers(m);
                 }
-                let out = enc.key(code, pressed, text);
+                let out = enc.key(code.into(), pressed, text);
                 self.send(out);
             }
             WindowEvent::Ime(Ime::Commit(text)) => {
