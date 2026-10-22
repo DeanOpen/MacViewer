@@ -319,6 +319,7 @@ dependencies = [
  "des",
  "getrandom 0.3.4",
  "jpeg-decoder",
+ "libc",
  "md-5",
  "png",
  "rustls",

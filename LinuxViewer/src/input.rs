@@ -1,9 +1,55 @@
 //! MouseMessage.swift + KeyboardMessage.swift, encode (viewer) and decode
 //! (host). Windows virtual-key + set-1 scan codes. OWNER: screen.
-//! The winit key table mirrors MacRemoteInputEncoder.swift's mapping.
+//! The key table mirrors MacRemoteInputEncoder.swift's mapping.
 
 use crate::messages::version_at_least;
-use winit::keyboard::KeyCode;
+
+macro_rules! key_codes {
+    ($($key:ident),* $(,)?) => {
+        /// Physical keys, named like winit's (and the W3C `code` values) so
+        /// non-winit front ends can pick them by name.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum KeyCode {
+            $($key,)*
+            /// Any key outside the table: it can still type its text.
+            Other,
+        }
+
+        impl KeyCode {
+            pub fn from_name(name: &str) -> Option<KeyCode> {
+                match name {
+                    $(stringify!($key) => Some(KeyCode::$key),)*
+                    _ => None,
+                }
+            }
+        }
+
+        #[cfg(feature = "desktop")]
+        impl From<winit::keyboard::KeyCode> for KeyCode {
+            fn from(code: winit::keyboard::KeyCode) -> KeyCode {
+                match code {
+                    $(winit::keyboard::KeyCode::$key => KeyCode::$key,)*
+                    _ => KeyCode::Other,
+                }
+            }
+        }
+    };
+}
+
+key_codes! {
+    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM,
+    KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+    Minus, Equal, BracketLeft, BracketRight, Backslash, Semicolon, Quote, Backquote,
+    Comma, Period, Slash, IntlBackslash, Space, Enter, Tab, Backspace, Escape,
+    ShiftLeft, ShiftRight, ControlLeft, ControlRight, AltLeft, AltRight, SuperLeft, SuperRight,
+    ContextMenu, CapsLock, NumLock, ScrollLock, PrintScreen, Pause,
+    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    F13, F14, F15, F16, F17, F18, F19, F20,
+    Insert, Delete, Home, End, PageUp, PageDown, ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
+    Numpad0, Numpad1, Numpad2, Numpad3, Numpad4, Numpad5, Numpad6, Numpad7, Numpad8, Numpad9,
+    NumpadDecimal, NumpadMultiply, NumpadAdd, NumpadSubtract, NumpadDivide, NumpadEnter, NumpadEqual,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum InputEvent {
@@ -128,7 +174,7 @@ pub fn decode(payload: &[u8]) -> Option<InputEvent> {
     Some(InputEvent::Mouse { msg, x, y, wheel })
 }
 
-/// Windows VK / set-1 make code for a winit physical key. E0-prefixed keys
+/// Windows VK / set-1 make code for a physical key. E0-prefixed keys
 /// keep the prefix in the high byte. `text` keys may carry an ASCII char;
 /// `control` is the character Windows reports for Return/Tab/Backspace/Esc.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -234,7 +280,7 @@ impl Held {
     }
 }
 
-/// Session-local input state (MacRemoteInputEncoder.swift), keyed by winit
+/// Session-local input state (MacRemoteInputEncoder.swift), keyed by
 /// physical keys. Returns the payloads to send, in order.
 #[derive(Default)]
 pub struct Encoder {
@@ -564,9 +610,9 @@ mod tests {
         let mut e = Encoder::new(true);
         assert_eq!(e.key_with(KeyCode::Backspace, true, Some("\u{7f}"), 0), [keyboard(1, 8, 14, 8, false)]);
         assert_eq!(e.key_with(KeyCode::KeyA, true, Some("é"), 0), [keyboard(1, 0x41, 0x1e, 0, false)]);
-        assert!(e.key_with(KeyCode::Lang1, true, None, 0).is_empty());
+        assert!(e.key_with(KeyCode::Other, true, None, 0).is_empty());
         // Extension: keys outside the table type their text as VK_PACKET.
-        assert_eq!(e.key_with(KeyCode::Lang1, true, Some("é"), 0).len(), 2);
+        assert_eq!(e.key_with(KeyCode::Other, true, Some("é"), 0).len(), 2);
     }
 
     #[test]
