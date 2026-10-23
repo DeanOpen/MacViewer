@@ -200,6 +200,9 @@
 "You disconnected from the remote computer." = "You disconnected from the remote computer.";
 "The remote session ended." = "The remote session ended.";
 "The remote computer disconnected." = "The remote computer disconnected.";
+"The UltraViewer service closed the connection before the Windows computer was found." = "The UltraViewer service closed the connection before the other computer was found.";
+"The relay connection to the Windows computer closed." = "The relay connection to the other computer closed.";
+"The Windows computer ended the session." = "The other computer ended the session.";
 "The remote session ended with an error." = "The remote session ended with an error.";
 "The connection could not be established." = "The connection could not be established.";
 "The connection ended before the Windows computer authenticated the session." = "The connection ended before the other computer authenticated the session.";

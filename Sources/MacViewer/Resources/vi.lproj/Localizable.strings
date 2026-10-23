@@ -200,6 +200,9 @@
 "You disconnected from the remote computer." = "Bạn đã ngắt kết nối với máy tính từ xa.";
 "The remote session ended." = "Phiên truy cập từ xa đã kết thúc.";
 "The remote computer disconnected." = "Máy tính từ xa đã ngắt kết nối.";
+"The UltraViewer service closed the connection before the Windows computer was found." = "Dịch vụ UltraViewer đã đóng kết nối trước khi tìm thấy máy kia.";
+"The relay connection to the Windows computer closed." = "Kết nối chuyển tiếp đến máy kia đã đóng.";
+"The Windows computer ended the session." = "Máy kia đã kết thúc phiên.";
 "The remote session ended with an error." = "Phiên truy cập đã kết thúc do lỗi.";
 "The connection could not be established." = "Không thể thiết lập kết nối.";
 "The connection ended before the Windows computer authenticated the session." = "Kết nối đã kết thúc trước khi máy kia xác thực phiên.";

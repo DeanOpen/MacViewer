@@ -93,10 +93,21 @@ public actor UltraViewerRelaySession {
         public var lanDirectLoginSent = false
         public var lanDirectActive = false
         public var lanDirectFallbacks = 0
+        /// The command (ID server) socket ended after the lookup; the session
+        /// continued on its relay or direct channel.
+        public var commandLinkLost = false
+        /// Why the latest session ended, or nil for a local close.
+        public var closeReason: String?
     }
 
     public enum Failure: Swift.Error, LocalizedError {
         case alreadyOpen, invalidPartner, notConnected, timedOut, closed
+        /// The UltraViewer service closed its connection before the lookup finished.
+        case commandClosed
+        /// The relay carrying the session closed its connection.
+        case relayClosed
+        /// The Windows computer sent an explicit end-of-session command.
+        case endedByPeer
         case wrongPassword, lookupRejected(Int32), invalidLookupRoute, partnerBlocked
         case unsupportedVersion, malformedInitialization, consumerTooSlow, viewOnly
 
@@ -107,6 +118,9 @@ public actor UltraViewerRelaySession {
             case .notConnected: "The Windows session is not connected."
             case .timedOut: "The Windows connection timed out."
             case .closed: "The remote computer disconnected."
+            case .commandClosed: "The UltraViewer service closed the connection before the Windows computer was found."
+            case .relayClosed: "The relay connection to the Windows computer closed."
+            case .endedByPeer: "The Windows computer ended the session."
             case .wrongPassword: "UltraViewer rejected the partner password."
             case let .lookupRejected(code): "UltraViewer declined the partner lookup (code \(code))."
             case .invalidLookupRoute: "UltraViewer returned an incomplete partner address."
@@ -321,10 +335,33 @@ public actor UltraViewerRelaySession {
                 guard generation == token, phase != .closed else { return }
                 try await consumeCommand(frame, token: token)
             }
-            if generation == token, phase != .closed { await finish(Failure.closed) }
+            guard generation == token, phase != .closed else { return }
+            if lookupCompleted { await commandLinkEnded(token: token); return }
+            await finish(Failure.commandClosed)
         } catch {
-            if generation == token { await finish(error) }
+            guard generation == token else { return }
+            if lookupCompleted, !(error is CancellationError) {
+                await commandLinkEnded(token: token)
+                return
+            }
+            await finish(error)
         }
+    }
+
+    /// After the lookup, the session runs on the relay (or LAN direct) channel.
+    /// The command socket carries nothing the viewer needs from then on.
+    private var lookupCompleted: Bool {
+        peerInfo != nil && (phase == .login || phase == .active)
+    }
+
+    /// Losing the command socket after the lookup must not end an authenticated
+    /// session. Drop it and keep the relay/direct channel running.
+    private func commandLinkEnded(token: UUID) async {
+        guard token == generation, phase != .closed else { return }
+        diagnostics.commandLinkLost = true
+        let transport = commandTransport
+        commandTransport = nil
+        await transport?.close()
     }
 
     private func consumeCommand(_ bytes: Data, token: UUID) async throws {
@@ -463,7 +500,7 @@ public actor UltraViewerRelaySession {
                 guard token == generation else { return }
                 if directState.selected == id, let failure = error as? Failure {
                     switch failure {
-                    case .closed, .partnerBlocked, .wrongPassword: await finish(error)
+                    case .closed, .endedByPeer, .partnerBlocked, .wrongPassword: await finish(error)
                     default: await directCandidateEnded(id, token: token)
                     }
                 } else { await directCandidateEnded(id, token: token) }
@@ -604,7 +641,7 @@ public actor UltraViewerRelaySession {
                 guard generation == token, phase != .closed else { return }
                 try await consumePeer(frame, token: token)
             }
-            if generation == token, phase != .closed { await relayEnded(Failure.closed, token: token) }
+            if generation == token, phase != .closed { await relayEnded(Failure.relayClosed, token: token) }
         } catch {
             if generation == token { await relayEnded(error, token: token) }
         }
@@ -859,7 +896,7 @@ public actor UltraViewerRelaySession {
                 armDeadline(token)
                 try await login(controlMode: -1, clearControlMode: true, token: token)
             }
-        case 27, 41, 54: throw Failure.closed
+        case 27, 41, 54: throw Failure.endedByPeer
         case 39: throw Failure.partnerBlocked
         case 48:
             if phase == .active { try renderer?.setTileSize(parts: parts) }
@@ -922,18 +959,23 @@ public actor UltraViewerRelaySession {
         do {
             peerPingStarted = DispatchTime.now().uptimeNanoseconds
             try await sendToPeer(Data("20".utf8))
-            guard token == generation, phase == .active else { return }
-            if pingCommandSocket {
-                // frmMain.tmPingServer: encrypted ASCII2, sixty-second interval.
-                try await commandTransport?.send(RelayKeepalive.commandEnvelope())
-                guard token == generation else { return }
-                diagnostics.commandKeepalivesSent += 1
-            }
-        }
-        catch {
+        } catch {
             guard token == generation else { return }
             if let id = directState.selected { await directCandidateEnded(id, token: token) }
             else { await finish(error) }
+            return
+        }
+        // frmMain.tmPingServer: encrypted ASCII2, sixty-second interval. The
+        // command socket is not part of the session after the lookup, so a
+        // failed keepalive drops only that socket, never the session.
+        guard token == generation, phase == .active, pingCommandSocket,
+              let command = commandTransport else { return }
+        do {
+            try await command.send(RelayKeepalive.commandEnvelope())
+            guard token == generation else { return }
+            diagnostics.commandKeepalivesSent += 1
+        } catch {
+            await commandLinkEnded(token: token)
         }
     }
 
@@ -1024,6 +1066,7 @@ public actor UltraViewerRelaySession {
     private func finish(_ error: (any Swift.Error)?) async {
         guard phase != .closed else { return }
         phase = .closed
+        diagnostics.closeReason = error.map { String(describing: $0) }
         files.reset(); fileOutbox.removeAll(); fileSendRevision = UUID(); fileSending = false
         generation = UUID()
         deadline?.cancel(); deadline = nil
