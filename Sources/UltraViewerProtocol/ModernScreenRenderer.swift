@@ -145,11 +145,29 @@ public final class ModernScreenRenderer {
     /// and continues on corrupt input; this implementation rejects it explicitly.
     @discardableResult
     public func apply(_ message: ModernScreenFrameMessage) throws -> ModernScreenBitmap {
+        try apply(message, rawPixels: nil)
+    }
+
+    /// Same pipeline as `apply(_:)`, but accepts the command-1 main pixels
+    /// already decompressed by `decompressMainPixels` on another executor. The
+    /// sequence/cache/scroll semantics are identical; passing nil behaves
+    /// exactly like the single-argument call.
+    @discardableResult
+    public func apply(_ message: ModernScreenFrameMessage, rawPixels suppliedPixels: Data?) throws -> ModernScreenBitmap {
         let expectedSequence = Int64(lastFrameNumber) + 1
         guard Int64(message.frameNumber) == expectedSequence else {
             throw ModernScreenMessageError.sequenceMismatch(expected: expectedSequence, received: message.frameNumber)
         }
-        let rawPixels = try decodeMainPixels(message)
+        let rawPixels: Data
+        if let suppliedPixels {
+            let expected = try Self.expectedMainPixelsLength(message, limits: limits)
+            guard suppliedPixels.count == expected else {
+                throw ModernScreenMessageError.decompressedLengthMismatch(expected: expected, received: suppliedPixels.count)
+            }
+            rawPixels = suppliedPixels
+        } else {
+            rawPixels = try decodeMainPixels(message)
+        }
         var next = state
 
         // 0x06000c65 IL_01c9..032c: capture main→converter, then converter→main.
@@ -225,15 +243,7 @@ public final class ModernScreenRenderer {
     }
 
     private func decodeMainPixels(_ message: ModernScreenFrameMessage) throws -> Data {
-        var expected = 0
-        for region in message.mainRectangles {
-            try limits.checkGeometry(width: region.width, height: region.height)
-            let count = try Self.product(try Self.product(region.width, region.height), 2)
-            guard count <= limits.maximumDecompressedBytes - expected else {
-                throw ModernScreenMessageError.sizeLimitExceeded
-            }
-            expected += count
-        }
+        let expected = try Self.expectedMainPixelsLength(message, limits: limits)
         try decompressor.reset() // UVC #25 before #16, for every drawing mission.
         let decoded = try decompressor.append(message.compressedPixels)
         try decompressor.finish()
@@ -241,6 +251,42 @@ public final class ModernScreenRenderer {
             throw ModernScreenMessageError.decompressedLengthMismatch(expected: expected, received: decoded.count)
         }
         return decoded
+    }
+
+    /// Decompress the command-1 main pixels exactly like `apply` would.
+    ///
+    /// Pure and detached-task safe: every call owns a fresh decoder (with the
+    /// caller's screen dictionary) and validates geometry, the decompressed
+    /// budget and the exact length before returning. Pass the session's
+    /// dictionary so the output matches the inline renderer path.
+    public static func decompressMainPixels(_ message: ModernScreenFrameMessage,
+                                            limits: ModernScreenLimits = .init(),
+                                            dictionary: Data? = nil) throws -> Data {
+        try limits.validate()
+        let expected = try expectedMainPixelsLength(message, limits: limits)
+        let decoder = try ZstdScreenDecoder(maximumOutputBytes: limits.maximumDecompressedBytes,
+                                            dictionary: dictionary)
+        let decoded = try decoder.append(message.compressedPixels)
+        try decoder.finish()
+        guard decoded.count == expected else {
+            throw ModernScreenMessageError.decompressedLengthMismatch(expected: expected, received: decoded.count)
+        }
+        return decoded
+    }
+
+    /// Bounded sum of the packed RGB555 rectangles in one main drawing mission.
+    private static func expectedMainPixelsLength(_ message: ModernScreenFrameMessage,
+                                                 limits: ModernScreenLimits) throws -> Int {
+        var expected = 0
+        for region in message.mainRectangles {
+            try limits.checkGeometry(width: region.width, height: region.height)
+            let count = try product(try product(region.width, region.height), 2)
+            guard count <= limits.maximumDecompressedBytes - expected else {
+                throw ModernScreenMessageError.sizeLimitExceeded
+            }
+            expected += count
+        }
+        return expected
     }
 
     private struct CopyWindow {

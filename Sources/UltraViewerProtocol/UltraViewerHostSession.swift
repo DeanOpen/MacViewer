@@ -71,6 +71,18 @@ public actor UltraViewerHostSession {
         /// Realtime events dropped because the UI consumer fell behind.
         public var droppedRealtimeEvents = 0
         public var droppedInputEvents = 0
+        /// Viewer quality preset last received on the `31|||N` command; nil
+        /// until a viewer actually sends one (legacy pacing applies until then).
+        public var qualityLevel: Int?
+        /// Partial-region vs full-canvas frames actually sent.
+        public var partialFramesSent = 0
+        public var fullFramesSent = 0
+        /// Percentage of the canvas covered by the last sent region (100 = full).
+        public var lastRegionCoveragePercent = 0.0
+        /// Encoded multipart bytes of the last sent frame.
+        public var lastFrameBytes = 0
+        /// Captures discarded because a previous frame was still encoding.
+        public var droppedFramesWhileEncoding = 0
     }
     public enum Failure: Swift.Error, LocalizedError {
         case alreadyRunning, notConnected, relayUnavailable, timedOut, slowConsumer, unsupportedDisplay
@@ -130,7 +142,11 @@ public actor UltraViewerHostSession {
     private var pendingFrame: HostedScreenFrame?
     private var lastFrame: HostedScreenFrame?
     private var nextSequence = HostedScreenMessage.firstFrameNumber
-    private let pacing = HostCapturePacing.standard
+    private var qualityPolicy = HostQualityPolicy.legacy
+    private let frameEncoder = HostedFrameEncoder()
+    /// At most one frame may be encoding or in flight; a capture that arrives
+    /// while the previous frame is still encoding is discarded.
+    private var encodingFrame = false
     private var waitingForAck = false
     private var captureTicket: UUID?
     /// One coalesced pointer move waiting for the next delivery slot. A burst
@@ -148,6 +164,8 @@ public actor UltraViewerHostSession {
         guard !configuration.registration.usesProxy else { throw Failure.relayUnavailable }
         self.configuration = configuration
         diagnostics = Diagnostics(); running = true
+        qualityPolicy = .legacy
+        encodingFrame = false
         let token = UUID(); generation = token
         // The host UI consumer can stall (permission prompt, modal file panel,
         // hot-plug). Realtime events are dropped under that pressure, so the
@@ -186,9 +204,15 @@ public actor UltraViewerHostSession {
     public func submitFrame(_ frame: HostedScreenFrame, ticket: UUID) async throws {
         guard peerPhase == .streaming, captureTicket == ticket else { return }
         captureTicket = nil
+        guard !encodingFrame else {
+            // The previous capture is still encoding; its ack will schedule the
+            // next capture. Dropping this stale frame keeps one frame in flight.
+            diagnostics.droppedFramesWhileEncoding += 1
+            return
+        }
         if let previous = lastFrame, previous.hasSameLayout(as: frame),
            previous.rgb555BottomUp == frame.rgb555BottomUp {
-            scheduleCapture(after: pacing.delay(afterFrameChanged: false))
+            scheduleCapture(after: qualityPolicy.unchangedFrameDelay)
             return
         }
         try await sendFrame(frame)
@@ -508,7 +532,12 @@ public actor UltraViewerHostSession {
             peerPhase = .streaming
             sessionToolsGate.didConnect(peer.request.id)
             try emit(.connected(peer.request))
-            if let frame = pendingFrame { pendingFrame = nil; try await sendFrame(frame) }
+            if let frame = pendingFrame, !encodingFrame {
+                // A frame already in encode owns the pipeline; leave the pending
+                // frame for the encoder completion to send after it finishes.
+                pendingFrame = nil
+                try await sendFrame(frame)
+            }
             return
         }
         let tag = Self.peerTag(payload)
@@ -519,8 +548,15 @@ public actor UltraViewerHostSession {
             waitingForAck = false; diagnostics.frameAcknowledgments += 1
             cancelViewerDeadline()
             // The acknowledgment is the backpressure: the next capture starts as
-            // soon as the viewer has decoded the previous frame.
-            scheduleCapture(after: pacing.delay(afterFrameChanged: true))
+            // soon as the viewer has decoded the previous frame. The viewer's
+            // quality preset only tunes that delay.
+            scheduleCapture(after: qualityPolicy.changedFrameDelay)
+        } else if tag == "31", let quality = HostQualityPolicy.parse(payload) {
+            // Viewer quality preset: pacing only, no canvas resize or wire reply.
+            qualityPolicy = HostQualityPolicy(quality: quality)
+            diagnostics.qualityLevel = qualityPolicy.quality
+        } else if tag == "32", payload == Data("32|||2".utf8) {
+            // Supported RGB555 converter mode: already the host's only mode.
         } else if tag == "32", payload == Data("32|||1".utf8) {
             await endViewer(reason: Failure.unsupportedDisplay.localizedDescription)
         } else if peerPhase == .streaming, controlAllowed,
@@ -567,21 +603,72 @@ public actor UltraViewerHostSession {
     }
 
     private func sendFrame(_ frame: HostedScreenFrame) async throws {
-        guard peerPhase == .streaming, !waitingForAck, let peer else { return }
+        guard peerPhase == .streaming, !waitingForAck, !encodingFrame, let currentPeer = peer else { return }
         if let old = lastFrame, !old.hasSameLayout(as: frame) {
-            try await initialize(peer, frame: frame, control: controlAllowed,
+            try await initialize(currentPeer, frame: frame, control: controlAllowed,
                                  resetSequence: HostFrameNumberPolicy.resetsSequence(for: .displayLayoutChange))
             return
         }
-        let data = try HostedScreenMessage.fullFrame(frame, sequence: nextSequence)
+        // The first frame after initialization is always a full canvas; later
+        // frames may send only the dirty rectangle.
+        let region: HostedScreenRegion
+        if let previous = lastFrame {
+            guard let changed = HostedScreenFrameDiff.changedRegion(
+                previous: previous, current: frame,
+                fullFrameThreshold: qualityPolicy.fullFrameThreshold) else {
+                // Pixels became identical between the fast path and here; keep
+                // the capture loop alive without sending anything.
+                scheduleCapture(after: qualityPolicy.unchangedFrameDelay)
+                return
+            }
+            region = changed
+        } else {
+            region = .full(width: frame.width, height: frame.height)
+        }
         guard nextSequence < Int32.max else { throw Failure.unsupportedDisplay }
+        let sequence = nextSequence
+        let peerID = currentPeer.request.id
+        let route = currentPeer.route
+        let token = generation
+        let initializationToken = initializationID
+        // Row reversal + Zstd run on the encoder actor, not on the session actor.
+        encodingFrame = true
+        let data: Data
+        do {
+            data = try await frameEncoder.encode(frame, region: region, sequence: sequence)
+        } catch {
+            encodingFrame = false
+            throw error
+        }
+        encodingFrame = false
+        // The viewer may have re-initialized, reconnected or departed while the
+        // frame encoded. Drop the encoded bytes rather than committing a stale
+        // sequence or ack state to the new initialization.
+        guard running, generation == token else { return }
+        if peerPhase == .streaming, !waitingForAck, let pending = pendingFrame {
+            // A viewer re-initialization completed during the encode and its
+            // first frame was deferred because this encode owned the pipeline.
+            pendingFrame = nil
+            try await sendFrame(pending)
+            return
+        }
+        guard peerPhase == .streaming, peer?.request.id == peerID,
+              initializationID == initializationToken else { return }
         nextSequence += 1; waitingForAck = true; lastFrame = frame
+        diagnostics.framesSent += 1
+        if region.isFull {
+            diagnostics.fullFramesSent += 1
+        } else {
+            diagnostics.partialFramesSent += 1
+        }
+        let canvasPixels = max(1, frame.width * frame.height)
+        diagnostics.lastRegionCoveragePercent = Double(region.area) * 100 / Double(canvasPixels)
+        diagnostics.lastFrameBytes = data.count
         // A multi-megabyte frame needs more than the base deadline on a slow but
         // progressing uplink; never disconnect mid-frame.
-        armViewerDeadline(token: generation, request: peer.request.id,
+        armViewerDeadline(token: token, request: peerID,
                           seconds: HostViewerDeadline.seconds(forFrameBytes: data.count))
-        try await send(data, route: peer.route)
-        diagnostics.framesSent += 1
+        try await send(data, route: route)
     }
 
     private func scheduleCapture(after delay: TimeInterval) {

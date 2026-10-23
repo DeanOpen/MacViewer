@@ -311,3 +311,102 @@ private let screenJPEGFixture = Data(base64Encoded:
         try limits.checkAtlasGeometry(width: 0, height: 100)
     }
 }
+
+@Test func modernPreDecompressedPixelsMatchInlineApply() throws {
+    // Full-frame mission.
+    let full = try ModernScreenFrameMessage.decode(parts: screenParts(
+        rectangles: [0, 0, 3, 2], pixels: screenWords([0x7c00, 0x03e0, 0x001f, 0x7fff, 0x0000, 0x7c00])))
+    let inline = try ModernScreenRenderer(width: 3, height: 2, displayColors: 2, lastFrameNumber: 0)
+    let offActor = try ModernScreenRenderer(width: 3, height: 2, displayColors: 2, lastFrameNumber: 0)
+    let pixels = try ModernScreenRenderer.decompressMainPixels(full)
+    let inlineBitmap = try inline.apply(full)
+    let offActorBitmap = try offActor.apply(full, rawPixels: pixels)
+    #expect(offActorBitmap == inlineBitmap)
+    #expect(offActor.bitmap == inline.bitmap)
+    #expect(offActor.lastFrameNumber == inline.lastFrameNumber)
+
+    // Region/scroll/cache mission over identical history.
+    let firstParts = screenParts(sequence: 2, rectangles: [0, 0, 1, 1], pixels: screenWords([0x7c00]),
+                                 additions: screenWords([0, 0, 1, 1]) + screenLong(10))
+    let first = try ModernScreenFrameMessage.decode(parts: firstParts)
+    try inline.apply(first)
+    try offActor.apply(first)
+    let second = try ModernScreenFrameMessage.decode(parts: screenParts(
+        sequence: 3, rectangles: [2, 1, 1, 1], pixels: screenWords([0x7fff]),
+        copy: [1, 0, 1, 1], references: screenWords([1, 0]) + screenLong(10),
+        additions: screenWords([2, 0, 1, 1]) + screenLong(20)))
+    let secondPixels = try ModernScreenRenderer.decompressMainPixels(second)
+    let inlineSecond = try inline.apply(second)
+    let offActorSecond = try offActor.apply(second, rawPixels: secondPixels)
+    #expect(offActorSecond == inlineSecond)
+    #expect(offActor.cacheEntryCount == inline.cacheEntryCount)
+    #expect(offActor.cacheByteCount == inline.cacheByteCount)
+    #expect(offActor.lastFrameNumber == inline.lastFrameNumber)
+}
+
+@Test func modernNilRawPixelsIsIdenticalToInlineApply() throws {
+    let message = try ModernScreenFrameMessage.decode(parts: screenParts(
+        rectangles: [1, 0, 3, 2], pixels: screenWords([0x7c00, 0x03e0, 0x001f, 0x7fff, 0x0000, 0x7c00])))
+    let single = try ModernScreenRenderer(width: 3, height: 2, displayColors: 2, lastFrameNumber: 0)
+    let explicitNil = try ModernScreenRenderer(width: 3, height: 2, displayColors: 2, lastFrameNumber: 0)
+    #expect(try explicitNil.apply(message, rawPixels: nil) == single.apply(message))
+    #expect(explicitNil.bitmap == single.bitmap)
+}
+
+@Test func modernPreDecompressedPixelsValidateLengthAndSequenceAtomically() throws {
+    let message = try ModernScreenFrameMessage.decode(parts: screenParts(
+        rectangles: [0, 0, 2, 1], pixels: screenWords([0x7c00, 0x03e0])))
+    let renderer = try ModernScreenRenderer(width: 2, height: 1, displayColors: 0, lastFrameNumber: 0)
+    let initial = renderer.bitmap
+    #expect(throws: ModernScreenMessageError.decompressedLengthMismatch(expected: 4, received: 2)) {
+        try renderer.apply(message, rawPixels: Data([0, 1]))
+    }
+    #expect(renderer.bitmap == initial && renderer.lastFrameNumber == 0)
+    // Sequence is checked before the supplied pixel length, like the inline path.
+    let wrongSequence = try ModernScreenFrameMessage.decode(parts: screenParts(
+        sequence: 2, rectangles: [0, 0, 2, 1], pixels: screenWords([0x7c00, 0x03e0])))
+    #expect(throws: ModernScreenMessageError.sequenceMismatch(expected: 1, received: 2)) {
+        try renderer.apply(wrongSequence, rawPixels: Data([0, 1]))
+    }
+    // A too-short buffer cannot be applied even when it is the right sequence.
+    #expect(throws: ModernScreenMessageError.decompressedLengthMismatch(expected: 4, received: 0)) {
+        try renderer.apply(message, rawPixels: Data())
+    }
+    #expect(renderer.bitmap == initial && renderer.lastFrameNumber == 0)
+    try renderer.apply(message, rawPixels: screenWords([0x7c00, 0x03e0]))
+    #expect(renderer.lastFrameNumber == 1)
+}
+
+@Test func modernDecompressHelperIsRepeatableAndMatchesInlineBytes() throws {
+    let message = try ModernScreenFrameMessage.decode(parts: screenParts(
+        rectangles: [0, 0, 32, 1],
+        pixels: hexData("00000100020003000400050006000700080009000a000b000c000d000e000f0010001100120013001400150016001700180019001a001b001c001d001e001f00")))
+    let first = try ModernScreenRenderer.decompressMainPixels(message)
+    let second = try ModernScreenRenderer.decompressMainPixels(message)
+    #expect(first == second)
+    #expect(first.count == 64)
+    // The helper's output must reproduce the inline renderer's bitmap.
+    let inline = try ModernScreenRenderer(width: 32, height: 1, displayColors: 0, lastFrameNumber: 0)
+    let offActor = try ModernScreenRenderer(width: 32, height: 1, displayColors: 0, lastFrameNumber: 0)
+    #expect(try offActor.apply(message, rawPixels: first) == inline.apply(message))
+}
+
+@Test func modernDecompressHelperRejectsOversizedRegionsAndIsDependencyFree() throws {
+    // Geometry validation is shared with the inline path. Built directly because
+    // the wire decoder already rejects this rectangle.
+    let oversized = ModernScreenFrameMessage(
+        frameNumber: 1,
+        mainRectangles: [ScreenRegion(x: 0, y: 0, width: 16_385, height: 1)],
+        compressedPixels: Data(), copyFromTemporary: [], scroll: nil,
+        auxiliaryJPEG: Data(), auxiliaryRectangles: [],
+        cacheReferences: [], cacheAdditions: [])
+    #expect(throws: ModernScreenMessageError.sizeLimitExceeded) {
+        try ModernScreenRenderer.decompressMainPixels(oversized)
+    }
+    // An empty mission decompresses to empty bytes and applies as a no-op frame.
+    let empty = try ModernScreenFrameMessage.decode(parts: screenParts())
+    #expect(try ModernScreenRenderer.decompressMainPixels(empty) == Data())
+    let renderer = try ModernScreenRenderer(width: 1, height: 1, displayColors: 0, lastFrameNumber: 0)
+    try renderer.apply(empty, rawPixels: try ModernScreenRenderer.decompressMainPixels(empty))
+    #expect(renderer.lastFrameNumber == 1)
+}
