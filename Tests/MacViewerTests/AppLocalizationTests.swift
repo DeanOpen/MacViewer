@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UltraViewerProtocol
 @testable import MacViewer
 
 struct AppLocalizationTests {
@@ -18,6 +19,19 @@ struct AppLocalizationTests {
         #expect(AppLanguage.localized("Connect to Windows", language: .en) == "Connect to another computer")
         #expect(AppLanguage.localized("Connect to Windows", language: .vi) == "Kết nối đến máy khác")
         #expect(AppLanguage.localized("a-synthetic-unknown-key", language: .vi) == "a-synthetic-unknown-key")
+    }
+
+    @Test("Every way a viewer session can close has its own translated message")
+    func sessionCloseMessages() throws {
+        let english = try catalog("en")
+        let vietnamese = try catalog("vi")
+        let failures: [UltraViewerRelaySession.Failure] = [.closed, .commandClosed, .relayClosed, .endedByPeer]
+        let messages = try failures.map { try #require($0.errorDescription) }
+        #expect(Set(messages).count == failures.count, "Close causes must stay distinguishable")
+        for message in messages {
+            #expect(english[message]?.isEmpty == false, "Missing English key: \(message)")
+            #expect(vietnamese[message]?.isEmpty == false, "Missing Vietnamese key: \(message)")
+        }
     }
 
     @Test("Catalog keys and typed format arguments match in both languages")
