@@ -164,7 +164,7 @@ final class MacScreenCapture {
     func capture(selection: String = MacDisplayLayout.allDisplaysKey) async throws -> HostedScreenFrame {
         // Calling ScreenCaptureKit without this gate can present a prompt.
         // The host UI requests permission explicitly before starting capture.
-        guard CGPreflightScreenCaptureAccess() else { throw MacScreenCaptureError.screenRecordingRequired }
+        guard MacHostingPermissions.screenRecordingAllowed() else { throw MacScreenCaptureError.screenRecordingRequired }
         try Task.checkCancellation()
         let token = revision
         let layout = try MacDisplayLayout(displays: MacSharingDisplay.current(), selection: selection)
@@ -189,7 +189,7 @@ final class MacScreenCapture {
             geometry = nil
             throw MacScreenCaptureError.displayConfigurationChanged
         }
-        guard CGPreflightScreenCaptureAccess() else { throw MacScreenCaptureError.screenRecordingRequired }
+        guard MacHostingPermissions.screenRecordingAllowed() else { throw MacScreenCaptureError.screenRecordingRequired }
         let pixels = try MacScreenPixels.composite(images: images, layout: layout)
         geometry = layout.geometry
         return HostedScreenFrame(width: layout.width, height: layout.height,
