@@ -550,3 +550,4 @@
 "Incoming connections" = "Incoming connections";
 "Allow all connections without asking" = "Allow all connections without asking";
 "Skips the approval prompt. Anyone with this Mac’s ID and password can see and control it while sharing is on." = "Skips the approval prompt. Anyone with this Mac’s ID and password can see and control it while sharing is on.";
+"The viewer stopped responding." = "The viewer stopped responding.";

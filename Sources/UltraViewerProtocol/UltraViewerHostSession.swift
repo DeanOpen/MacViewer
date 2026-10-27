@@ -132,6 +132,7 @@ public actor UltraViewerHostSession {
     private var nextSequence = HostedScreenMessage.firstFrameNumber
     private let pacing = HostCapturePacing.standard
     private var waitingForAck = false
+    private var lastViewerActivity: UInt64 = 0
     private var captureTicket: UUID?
     /// One coalesced pointer move waiting for the next delivery slot. A burst
     /// of Windows mouse moves keeps only the newest position.
@@ -474,6 +475,7 @@ public actor UltraViewerHostSession {
             return
         }
         guard let peer, peer.route == route else { diagnostics.rejectedSources += 1; return }
+        lastViewerActivity = DispatchTime.now().uptimeNanoseconds
         if canUseSessionTools(peer.request.id), let message = FileTransferMessage.decodeViewerPayload(payload) {
             try await applyFileUpdate(files.consume(message), session: peer.request.id)
             return
@@ -517,7 +519,7 @@ public actor UltraViewerHostSession {
             try await send(HostedScreenMessage.keepaliveReply(), route: route)
         } else if tag == "18", peerPhase == .streaming, waitingForAck {
             waitingForAck = false; diagnostics.frameAcknowledgments += 1
-            cancelViewerDeadline()
+            armIdleViewerDeadline(token: generation, request: peer.request.id)
             // The acknowledgment is the backpressure: the next capture starts as
             // soon as the viewer has decoded the previous frame.
             scheduleCapture(after: pacing.delay(afterFrameChanged: true))
@@ -609,6 +611,35 @@ public actor UltraViewerHostSession {
                 await self?.viewerExpired(token: token, request: request, deadline: deadlineID)
             } catch {}
         }
+    }
+
+    /// A static screen sends no frames, so no acknowledgment deadline is armed.
+    /// Viewers still ping (ASCII 20) after 15 s without sending, so a minute
+    /// of silence means the viewer is gone and the session must not keep
+    /// claiming the Mac is shared.
+    private static let idleViewerNanoseconds: UInt64 = 60_000_000_000
+
+    private func armIdleViewerDeadline(token: UUID, request: UUID) {
+        cancelViewerDeadline()
+        let deadlineID = viewerDeadlineID
+        viewerDeadline = Task { [weak self] in
+            do {
+                while true {
+                    try await Task.sleep(seconds: 15)
+                    guard let self, let silent = await self.viewerIsSilent(token: token, request: request,
+                                                                           deadline: deadlineID) else { return }
+                    if silent { await self.endViewer(reason: "The viewer stopped responding."); return }
+                }
+            } catch {}
+        }
+    }
+
+    /// nil once this watchdog no longer belongs to the current viewer.
+    private func viewerIsSilent(token: UUID, request: UUID, deadline: UUID) -> Bool? {
+        guard running, generation == token, peer?.request.id == request, viewerDeadlineID == deadline else {
+            return nil
+        }
+        return DispatchTime.now().uptimeNanoseconds - lastViewerActivity >= Self.idleViewerNanoseconds
     }
 
     private func cancelViewerDeadline() {

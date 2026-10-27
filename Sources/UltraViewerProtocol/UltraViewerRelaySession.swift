@@ -633,7 +633,11 @@ public actor UltraViewerRelaySession {
             diagnostics.peerTransportOpened = true
             if directState.selected == nil, directState.loginCandidate == nil {
                 try emit(.status("Waiting for Windows to accept the session…"))
-                if phase != .active { armDeadline(token) }
+                // The first Login waits on a person at the host's approval
+                // prompt (MacViewer's waits 45 s), not on the network.
+                if phase != .active {
+                    armDeadline(token, seconds: diagnostics.peerAccepted ? 20 : Self.approvalWaitSeconds)
+                }
                 try await login(controlMode: 0, clearControlMode: false, token: token, source: .relay)
             }
             for try await frame in stream {
@@ -928,11 +932,13 @@ public actor UltraViewerRelaySession {
         }
     }
 
-    private func armDeadline(_ token: UUID) {
+    private static let approvalWaitSeconds: TimeInterval = 60
+
+    private func armDeadline(_ token: UUID, seconds: TimeInterval = 20) {
         deadline?.cancel()
         deadline = Task { [weak self] in
             do {
-                try await Task.sleep(seconds: 20)
+                try await Task.sleep(seconds: seconds)
                 guard let self else { return }
                 await self.expired(token)
             } catch {}
