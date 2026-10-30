@@ -361,10 +361,61 @@ public final class ModernScreenRenderer {
         return AuxiliaryAtlas(width: imageWidth, height: imageHeight, pixels: rgba)
     }
 
+    private struct AtlasPlacement {
+        let sourceX, sourceY, width, height, destinationX, destinationY: Int
+    }
+
     private func applyAuxiliary(_ atlas: AuxiliaryAtlas, rectangles: [ScreenRegion], to state: inout State) throws {
+        let placements: [AtlasPlacement]
+        if let walk = try atlasWalk(atlas, rectangles: rectangles, tileSize: tileSize) {
+            placements = walk.placements
+        } else if let (size, walk) = alternateAtlasWalk(atlas, rectangles: rectangles) {
+            // The sender changed its tile size without this renderer seeing the
+            // command 48 (or initialization) that carried it. Only a size that
+            // packs the atlas exactly, ending in its last column, is adopted.
+            Logger(subsystem: "dev.macviewer.app", category: "screen").notice(
+                "Atlas tile size \(self.tileSize) did not fit atlas=\(atlas.width)x\(atlas.height); using \(size)")
+            tileSize = size
+            placements = walk.placements
+        } else {
+            Logger(subsystem: "dev.macviewer.app", category: "screen").error(
+                "Atlas bounds: atlas=\(atlas.width)x\(atlas.height) tile=\(self.tileSize) rectangles=\(rectangles.count)")
+            throw ModernScreenMessageError.auxiliaryAtlasOutOfBounds
+        }
+        let mainWidth = width
+        atlas.pixels.withUnsafeBytes { (source: UnsafeRawBufferPointer) in
+            state.mainPixels.withUnsafeMutableBytes { (target: UnsafeMutableRawBufferPointer) in
+                for tile in placements {
+                    for row in 0..<tile.height {
+                        // Native TurboJPEG flags1026 are bottom-up. An
+                        // address reversal preserves that order without
+                        // converting/copying the complete decoded atlas.
+                        let sourceOffset = ((atlas.height - 1 - tile.sourceY - row) * atlas.width + tile.sourceX) * 4
+                        let destination = ((tile.destinationY + row) * mainWidth + tile.destinationX) * 4
+                        target.baseAddress!.advanced(by: destination).copyMemory(
+                            from: source.baseAddress!.advanced(by: sourceOffset), byteCount: tile.width * 4)
+                    }
+                }
+            }
+        }
+    }
+
+    private func alternateAtlasWalk(_ atlas: AuxiliaryAtlas, rectangles: [ScreenRegion])
+        -> (Int, (placements: [AtlasPlacement], lastColumn: Int))? {
+        for size in [16, 32, 64, 8, 128] where size != tileSize && atlas.width.isMultiple(of: size) {
+            guard let walk = try? atlasWalk(atlas, rectangles: rectangles, tileSize: size),
+                  walk.lastColumn == atlas.width / size - 1 else { continue }
+            return (size, walk)
+        }
+        return nil
+    }
+
+    /// The recovered atlas cursor, or nil when it leaves the atlas.
+    private func atlasWalk(_ atlas: AuxiliaryAtlas, rectangles: [ScreenRegion], tileSize: Int)
+        throws -> (placements: [AtlasPlacement], lastColumn: Int)? {
+        var placements: [AtlasPlacement] = []
         var sourceColumn = 0
         var sourceY = 0
-        var tileCount = 0
         for rectangle in rectangles {
             guard isInside(rectangle, width: width, height: height) else {
                 throw ModernScreenMessageError.invalidGeometry
@@ -372,10 +423,9 @@ public final class ModernScreenRenderer {
             // Recovered loop order: destination x outside, destination y inside.
             for dx in stride(from: 0, to: rectangle.width, by: tileSize) {
                 for dy in stride(from: 0, to: rectangle.height, by: tileSize) {
-                    guard tileCount < limits.maximumAuxiliaryTiles else {
+                    guard placements.count < limits.maximumAuxiliaryTiles else {
                         throw ModernScreenMessageError.sizeLimitExceeded
                     }
-                    tileCount += 1
                     let tileWidth = min(tileSize, rectangle.width - dx)
                     let tileHeight = min(tileSize, rectangle.height - dy)
                     if sourceY + tileHeight > atlas.height {
@@ -385,28 +435,16 @@ public final class ModernScreenRenderer {
                     let sourceX = try Self.product(sourceColumn, tileSize)
                     guard tileWidth <= atlas.width, tileHeight <= atlas.height,
                           sourceX <= atlas.width - tileWidth, sourceY <= atlas.height - tileHeight else {
-                        Logger(subsystem: "dev.macviewer.app", category: "screen").error(
-                            "Atlas bounds: atlas=\(atlas.width)x\(atlas.height) tile=\(self.tileSize) source=\(sourceX),\(sourceY) size=\(tileWidth)x\(tileHeight) rectangle=\(rectangle.x),\(rectangle.y),\(rectangle.width),\(rectangle.height)")
-                        throw ModernScreenMessageError.auxiliaryAtlasOutOfBounds
+                        return nil
                     }
-                    let mainWidth = width
-                    atlas.pixels.withUnsafeBytes { (source: UnsafeRawBufferPointer) in
-                        state.mainPixels.withUnsafeMutableBytes { (target: UnsafeMutableRawBufferPointer) in
-                            for row in 0..<tileHeight {
-                                // Native TurboJPEG flags1026 are bottom-up. An
-                                // address reversal preserves that order without
-                                // converting/copying the complete decoded atlas.
-                                let sourceOffset = ((atlas.height - 1 - sourceY - row) * atlas.width + sourceX) * 4
-                                let destination = ((rectangle.y + dy + row) * mainWidth + rectangle.x + dx) * 4
-                                target.baseAddress!.advanced(by: destination).copyMemory(
-                                    from: source.baseAddress!.advanced(by: sourceOffset), byteCount: tileWidth * 4)
-                            }
-                        }
-                    }
+                    placements.append(AtlasPlacement(sourceX: sourceX, sourceY: sourceY,
+                        width: tileWidth, height: tileHeight,
+                        destinationX: rectangle.x + dx, destinationY: rectangle.y + dy))
                     sourceY += tileHeight
                 }
             }
         }
+        return (placements, sourceColumn)
     }
 
     private func isInside(_ region: ScreenRegion, width: Int, height: Int) -> Bool {

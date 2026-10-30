@@ -903,7 +903,9 @@ public actor UltraViewerRelaySession {
         case 27, 41, 54: throw Failure.endedByPeer
         case 39: throw Failure.partnerBlocked
         case 48:
-            if phase == .active { try renderer?.setTileSize(parts: parts) }
+            // Native stores DefaultFrameWidthHeight whenever 48 arrives, also
+            // between a re-login and its initialization.
+            try renderer?.setTileSize(parts: parts)
         case 49:
             guard parts.count > 1, let value = parts[1].first else {
                 throw Failure.malformedInitialization
