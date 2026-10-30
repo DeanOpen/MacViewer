@@ -101,7 +101,7 @@ DESKTOP
 }
 
 # Lean default: installs anywhere.
-build_variant linuxviewer "--no-default-features" "" ""
+build_variant linuxviewer "--no-default-features --features desktop" "" ""
 # Wayland variant: adds PipeWire. Conflicts with the lean package (same binary).
 build_variant linuxviewer-wayland "" ", libpipewire-0.3-0" \
 "Conflicts: linuxviewer
