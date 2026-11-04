@@ -183,7 +183,9 @@ public final class ModernScreenRenderer {
         // IL_0512..0886: JPEG atlas tiles write full color directly to main.
         if !message.auxiliaryRectangles.isEmpty {
             let atlas = try decodeAuxiliaryJPEG(message.auxiliaryJPEG)
+            let skippedBefore = skippedAtlases
             try applyAuxiliary(atlas, rectangles: message.auxiliaryRectangles, to: &next)
+            if skippedAtlases != skippedBefore { dumpSkippedAtlas(message) }
         }
 
         // IL_0995..0d8a: each packed raw rectangle stages at converter (0,0).
@@ -406,9 +408,30 @@ public final class ModernScreenRenderer {
         }
     }
 
+    /// Keeps the first few unplaceable atlases (JPEG plus its rectangle list)
+    /// in Caches/dev.macviewer.app/atlas-dumps so the packing can be studied.
+    private func dumpSkippedAtlas(_ message: ModernScreenFrameMessage) {
+        guard Bundle.main.bundleIdentifier == "dev.macviewer.app",
+              let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        let directory = caches.appendingPathComponent("dev.macviewer.app/atlas-dumps", isDirectory: true)
+        let existing = (try? FileManager.default.contentsOfDirectory(atPath: directory.path))?.count ?? 0
+        guard existing < 10 else { return }
+        let name = "atlas-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let rectangles = message.auxiliaryRectangles.map { [$0.x, $0.y, $0.width, $0.height] }
+        let info: [String: Any] = ["screenWidth": width, "screenHeight": height, "tileSize": tileSize,
+                                   "rectangles": rectangles]
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try message.auxiliaryJPEG.write(to: directory.appendingPathComponent(name + ".jpg"))
+            try JSONSerialization.data(withJSONObject: info)
+                .write(to: directory.appendingPathComponent(name + ".json"))
+        } catch {}
+    }
+
     private func alternateAtlasWalk(_ atlas: AuxiliaryAtlas, rectangles: [ScreenRegion])
         -> (Int, (placements: [AtlasPlacement], lastColumn: Int))? {
-        for size in [16, 32, 64, 8, 128] where size != tileSize && atlas.width.isMultiple(of: size) {
+        let sizes = [16, 32, 64] + Array(stride(from: 8, through: 128, by: 8)).filter { ![16, 32, 64].contains($0) }
+        for size in sizes where size != tileSize && size <= atlas.width {
             guard let walk = try? atlasWalk(atlas, rectangles: rectangles, tileSize: size),
                   walk.lastColumn == atlas.width / size - 1 else { continue }
             return (size, walk)
