@@ -64,6 +64,8 @@ public final class ModernScreenRenderer {
     public let height: Int
     public private(set) var tileSize: Int
     public private(set) var lastFrameNumber: Int32
+    /// Atlases no tile size could place; their regions kept older pixels.
+    public private(set) var skippedAtlases = 0
     public let limits: ModernScreenLimits
 
     private struct CachedRectangle {
@@ -378,9 +380,13 @@ public final class ModernScreenRenderer {
             tileSize = size
             placements = walk.placements
         } else {
+            // No tile size explains this atlas. Leave those regions as they
+            // were rather than fail the frame; the session asks for a fresh
+            // screen when it sees skippedAtlases grow.
             Logger(subsystem: "dev.macviewer.app", category: "screen").error(
-                "Atlas bounds: atlas=\(atlas.width)x\(atlas.height) tile=\(self.tileSize) rectangles=\(rectangles.count)")
-            throw ModernScreenMessageError.auxiliaryAtlasOutOfBounds
+                "Atlas skipped: atlas=\(atlas.width)x\(atlas.height) tile=\(self.tileSize) rectangles=\(rectangles.count)")
+            skippedAtlases += 1
+            return
         }
         let mainWidth = width
         atlas.pixels.withUnsafeBytes { (source: UnsafeRawBufferPointer) in

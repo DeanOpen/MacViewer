@@ -218,6 +218,7 @@ public actor UltraViewerRelaySession {
         self.pendingRelayInitialization = nil
         self.relayPingStarted = nil; self.peerPingStarted = nil
         self.heartbeatTicks = 0
+        self.lastDamageRefresh = nil
         self.stallTask?.cancel(); self.stallTask = nil; self.stall = nil
         self.stallRecovering = false
         self.capturedCommands = []
@@ -246,6 +247,18 @@ public actor UltraViewerRelaySession {
 
     /// Renegotiate a complete screen using the established clear-mode Login path.
     /// Retain the authenticated identity, but suspend control until initialization.
+    /// Damaged frames ask for a full screen at most every ten seconds. Frames
+    /// in between are dropped (or drawn without their atlas), never fatal.
+    private static let damageRefreshNanoseconds: UInt64 = 10_000_000_000
+    private var lastDamageRefresh: UInt64?
+
+    private func refreshScreenAfterDamage() async throws {
+        let now = DispatchTime.now().uptimeNanoseconds
+        if let last = lastDamageRefresh, now - last < Self.damageRefreshNanoseconds { return }
+        lastDamageRefresh = now
+        try await refreshScreen()
+    }
+
     public func refreshScreen() async throws {
         guard phase == .active else { throw Failure.notConnected }
         let token = generation
@@ -861,6 +874,7 @@ public actor UltraViewerRelaySession {
             diagnostics.screenPayloadBytes += UInt64(payload.count)
             let decodingStarted = DispatchTime.now().uptimeNanoseconds
             do {
+                let skippedBefore = renderer.skippedAtlases
                 let bitmap = try renderer.apply(ModernScreenFrameMessage.decode(parts: parts))
                 let elapsed = DispatchTime.now().uptimeNanoseconds - decodingStarted
                 diagnostics.decodeNanoseconds += elapsed
@@ -870,14 +884,17 @@ public actor UltraViewerRelaySession {
                 // Backpressure follows successful decoding, so a slow client
                 // cannot acknowledge a growing queue of stale screen updates.
                 try await sendToPeer(Data("18".utf8))
+                if renderer.skippedAtlases != skippedBefore {
+                    diagnostics.lastScreenFailure = "auxiliaryAtlasSkipped"
+                    try await refreshScreenAfterDamage()
+                }
             } catch let error as ModernScreenMessageError {
                 diagnostics.lastScreenFailure = String(describing: error)
                 try await sendToPeer(Data("18".utf8))
-                // A malformed drawing mission must not immediately tear down an
+                // A malformed drawing mission must not tear down an
                 // authenticated connection. A new full initialization resets the
                 // decoder and tile cache together; never continue a damaged cache.
-                guard diagnostics.screenRefreshes < 2 else { throw error }
-                try await refreshScreen()
+                try await refreshScreenAfterDamage()
             }
         case 20:
             if let started = peerPingStarted {

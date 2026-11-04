@@ -287,8 +287,10 @@ private let screenJPEGFixture = Data(base64Encoded:
 @Test func modernScreenAuxiliaryBoundsAndTileSizeUpdates() throws {
     let renderer = try ModernScreenRenderer(width: 5, height: 1, tileSize: 1, displayColors: 0, lastFrameNumber: 0)
     let overflow = try ModernScreenFrameMessage.decode(parts: screenParts(jpeg: screenJPEGFixture, auxiliary: [0, 0, 5, 1]))
-    #expect(throws: ModernScreenMessageError.auxiliaryAtlasOutOfBounds) { try renderer.apply(overflow) }
-    #expect(renderer.lastFrameNumber == 0)
+    // No tile size places this atlas: the frame applies without it.
+    _ = try renderer.apply(overflow)
+    #expect(renderer.skippedAtlases == 1)
+    #expect(renderer.lastFrameNumber == 1)
     try renderer.setTileSize(parts: [Data([48]), Data([2])])
     #expect(renderer.tileSize == 2)
     #expect(throws: ModernScreenMessageError.malformedPart(1)) {
