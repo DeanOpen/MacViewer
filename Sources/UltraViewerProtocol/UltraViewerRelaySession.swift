@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Darwin
 
 /// Relay session with an optional encrypted LAN candidate. Ordinary partner
@@ -805,6 +806,8 @@ public actor UltraViewerRelaySession {
         case 0:
             guard phase == .login || phase == .active else { return }
             let initialization = try ModernScreenInitialization.decode(parts: parts)
+            Logger(subsystem: "dev.macviewer.app", category: "screen").notice(
+                "Initialization \(initialization.width)x\(initialization.height) tile \(initialization.tileSize) parts \(parts.count)")
             let geometryChanged = upgradingID != nil || renderer?.width != initialization.width || renderer?.height != initialization.height
             if geometryChanged, parts.count > 13, parts[13].isEmpty { throw Failure.malformedInitialization }
             let version = initialization.targetVersionBytes.map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -923,6 +926,8 @@ public actor UltraViewerRelaySession {
             // Native stores DefaultFrameWidthHeight whenever 48 arrives, also
             // between a re-login and its initialization.
             try renderer?.setTileSize(parts: parts)
+            Logger(subsystem: "dev.macviewer.app", category: "screen").notice(
+                "Command 48 tile size \(parts.count > 1 ? Int(parts[1].first ?? 0) : -1), renderer \(self.renderer == nil ? "absent" : "present")")
         case 49:
             guard parts.count > 1, let value = parts[1].first else {
                 throw Failure.malformedInitialization

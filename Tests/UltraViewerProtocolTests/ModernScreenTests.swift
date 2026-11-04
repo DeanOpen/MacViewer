@@ -312,18 +312,17 @@ private func solidJPEG(width: Int, height: Int) -> Data {
     return data as Data
 }
 
-// A 40x32 rectangle packed with 16-pixel tiles fills a 32x48 atlas exactly
-// (two columns of three tiles). Walked with a stale 32-pixel tile size it
-// leaves the atlas, as live Windows frames did after a missed tile change.
-@Test func modernAtlasAdoptsTheTileSizeThatPacksItExactly() throws {
+// A 40x32 rectangle packed with 16-pixel tiles fills a 32x48 atlas. Walked
+// with a stale 32-pixel tile size it leaves the atlas: the frame still
+// applies, without guessing another size and drawing tiles in wrong places.
+@Test func modernAtlasThatDoesNotFitIsSkippedNotGuessed() throws {
     let renderer = try ModernScreenRenderer(width: 40, height: 32, tileSize: 32, displayColors: 0, lastFrameNumber: 0)
     let message = try ModernScreenFrameMessage.decode(parts: screenParts(
         jpeg: solidJPEG(width: 32, height: 48), auxiliary: [0, 0, 40, 32]))
-    let pixels = [UInt8](try renderer.apply(message).bgrPixels)
-    #expect(renderer.tileSize == 16)
+    _ = try renderer.apply(message)
+    #expect(renderer.tileSize == 32)
+    #expect(renderer.skippedAtlases == 1)
     #expect(renderer.lastFrameNumber == 1)
-    #expect(pixels.count == 40 * 32 * 3)
-    #expect(stride(from: 0, to: pixels.count, by: 3).allSatisfy { pixels[$0 + 1] > 200 && pixels[$0] < 60 })
 }
 
 @Test func modernAtlasHasIndependentDimensionAndPixelBudgets() throws {

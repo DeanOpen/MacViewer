@@ -373,16 +373,8 @@ public final class ModernScreenRenderer {
         let placements: [AtlasPlacement]
         if let walk = try atlasWalk(atlas, rectangles: rectangles, tileSize: tileSize) {
             placements = walk.placements
-        } else if let (size, walk) = alternateAtlasWalk(atlas, rectangles: rectangles) {
-            // The sender changed its tile size without this renderer seeing the
-            // command 48 (or initialization) that carried it. Only a size that
-            // packs the atlas exactly, ending in its last column, is adopted.
-            Logger(subsystem: "dev.macviewer.app", category: "screen").notice(
-                "Atlas tile size \(self.tileSize) did not fit atlas=\(atlas.width)x\(atlas.height); using \(size)")
-            tileSize = size
-            placements = walk.placements
         } else {
-            // No tile size explains this atlas. Leave those regions as they
+            // The atlas does not fit the current tile size. Leave those regions as they
             // were rather than fail the frame; the session asks for a fresh
             // screen when it sees skippedAtlases grow.
             Logger(subsystem: "dev.macviewer.app", category: "screen").error(
@@ -426,17 +418,6 @@ public final class ModernScreenRenderer {
             try JSONSerialization.data(withJSONObject: info)
                 .write(to: directory.appendingPathComponent(name + ".json"))
         } catch {}
-    }
-
-    private func alternateAtlasWalk(_ atlas: AuxiliaryAtlas, rectangles: [ScreenRegion])
-        -> (Int, (placements: [AtlasPlacement], lastColumn: Int))? {
-        let sizes = [16, 32, 64] + Array(stride(from: 8, through: 128, by: 8)).filter { ![16, 32, 64].contains($0) }
-        for size in sizes where size != tileSize && size <= atlas.width {
-            guard let walk = try? atlasWalk(atlas, rectangles: rectangles, tileSize: size),
-                  walk.lastColumn == atlas.width / size - 1 else { continue }
-            return (size, walk)
-        }
-        return nil
     }
 
     /// The recovered atlas cursor, or nil when it leaves the atlas.
