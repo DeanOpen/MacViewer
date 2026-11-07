@@ -50,6 +50,8 @@ struct RemoteSessionToolbarCallbacks {
     var showRemoteCursor = true
     var setShowRemoteCursor: ((Bool) -> Void)? = nil
     var switchSides: (() -> Void)? = nil
+    var swapCommandControl = true
+    var setSwapCommandControl: ((Bool) -> Void)? = nil
 }
 
 @MainActor
@@ -75,46 +77,39 @@ struct RemoteSessionToolbar: View {
     @AppStorage(RemoteAudioPlayer.volumeKey) private var audioVolume = 1.0
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: callbacks.home) { Image(systemName: "chevron.left") }
-                .accessibilityLabel("Home")
-                .help("Return home without disconnecting")
-            Divider().frame(height: 23)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(peerName).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                Text("UltraViewer compatible").font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
-            }.frame(maxWidth: 130, alignment: .leading)
-            Spacer(minLength: 4)
-            actionsMenu
-            monitorMenu
-            configurationMenu
-            fitToggle
-            cursorToggle
-            captureMenu
-            SessionClipboardButton(tools: tools)
-            SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput,
-                               toggleSidebar: callbacks.toggleChat)
-            Divider().frame(height: 23)
-            Toggle("Control", isOn: $controlEnabled).toggleStyle(.switch)
-                .disabled(!isConnected || !allowsControl).fixedSize()
-            Toggle(isOn: $forwardShortcuts) { Label("Send ⌘ shortcuts", systemImage: "command") }
-                .buttonToggle().fixedSize()
-                .disabled(!controlEnabled)
-                .help(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts go to the other computer. Click to keep them on this Mac."
-                                       : "⌘ shortcuts stay on this Mac. Click to send them to the other computer."))
-                .accessibilityLabel("Send keyboard shortcuts to the other computer")
-            Divider().frame(height: 23)
-            // Filled red so it reads as a button among the borderless toolbar items.
-            RoleButton(role: .destructive, action: callbacks.disconnect) {
-                Label("Disconnect", systemImage: "xmark.circle.fill")
+        HStack(spacing: 8) {
+            group {
+                actionsMenu
+                monitorMenu
             }
-            .prominentButton(tint: .red)
+            group {
+                fitToggle
+                cursorToggle
+                configurationMenu
+            }
+            group {
+                captureMenu
+                SessionClipboardButton(tools: tools, compact: true)
+                SessionToolsButton(tools: tools, peerName: peerName, context: "Outgoing", onOpen: callbacks.releaseInput,
+                                   toggleSidebar: callbacks.toggleChat, compact: true)
+                    .toolbarIcon()
+            }
+            Spacer(minLength: 8)
+            controlSwitch
+            shortcutsToggle
+            Divider().frame(height: 18)
+            RoleButton(role: .destructive, action: callbacks.disconnect) {
+                Label("Disconnect", systemImage: "power")
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 9).frame(height: 24)
+                    .shapeBackground(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            }
             .help("End the connection to this computer")
-            Button(action: callbacks.hideToolbar) { Image(systemName: "chevron.up") }
+            Button(action: callbacks.hideToolbar) { Image(systemName: "chevron.up").toolbarIcon() }
                 .help("Hide session toolbar").accessibilityLabel("Hide session toolbar")
         }
         .font(.system(size: 12)).buttonStyle(.borderless).controlSize(.small)
-        .padding(.horizontal, 12).padding(.vertical, 5).barBackground()
+        .padding(.horizontal, 10).padding(.vertical, 5).barBackground()
         .sheet(isPresented: $showCustomQuality) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Image quality").font(.title2.weight(.semibold))
@@ -139,6 +134,58 @@ struct RemoteSessionToolbar: View {
                    message: capture.errorMessage, buttons: [.cancel(L("OK"), action: capture.clearError)])
     }
 
+    /// A rounded cluster of related icon buttons.
+    private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 2) { content() }
+            .padding(.horizontal, 3).frame(height: 28)
+            .shapeBackground(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Reads at a glance: grey "View only", or tinted "Controlling".
+    private var controlSwitch: some View {
+        Button { controlEnabled.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: controlEnabled ? "cursorarrow.motionlines" : "eye")
+                Text(LocalizedStringKey(controlEnabled ? "Controlling" : "View only"))
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(controlEnabled ? .white : .primary)
+            .padding(.horizontal, 10).frame(height: 24)
+            .shapeBackground(controlEnabled ? Color.accentColor : Color.primary.opacity(0.07),
+                             in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .disabled(!isConnected || !allowsControl)
+        .help(LocalizedStringKey(controlEnabled ? "Click to stop sending your keyboard and mouse"
+                                 : "Click to control the other computer with your keyboard and mouse"))
+        .accessibilityLabel("Control")
+    }
+
+    private var shortcutsToggle: some View {
+        AppKitMenuButton { menu in
+            menu.toggle("Send ⌘ shortcuts to the other computer", isOn: forwardShortcuts) { forwardShortcuts = $0 }
+            if let setSwap = callbacks.setSwapCommandControl {
+                menu.toggle("Use ⌘ as Ctrl (Windows)", isOn: callbacks.swapCommandControl, action: setSwap)
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "command")
+                if callbacks.swapCommandControl, forwardShortcuts {
+                    Text("→ Ctrl").font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .foregroundColor(forwardShortcuts && controlEnabled ? .accentColor : .secondary)
+            .padding(.horizontal, 6).frame(height: 24)
+            .shapeBackground(forwardShortcuts && controlEnabled ? Color.accentColor.opacity(0.14) : Color.clear,
+                             in: RoundedRectangle(cornerRadius: 6))
+        }
+        .fixedSize()
+        .disabled(!controlEnabled)
+        .help(LocalizedStringKey(forwardShortcuts ? "⌘ shortcuts go to the other computer. Click to keep them on this Mac."
+                               : "⌘ shortcuts stay on this Mac. Click to send them to the other computer."))
+        .accessibilityLabel("Send keyboard shortcuts to the other computer")
+    }
+
     private var actionsMenu: some View {
         AppKitMenuButton { menu in
             let canAct = allowsControl && controlEnabled
@@ -157,9 +204,10 @@ struct RemoteSessionToolbar: View {
             menu.separator()
             menu.button("Release pressed keys and buttons", enabled: controlEnabled, action: callbacks.releaseInput)
         } label: {
-            Label("Actions", systemImage: "bolt.circle.fill")
+            Image(systemName: "bolt.fill").padding(.leading, 6)
         }
         .fixedSize().disabled(!isConnected)
+        .help("Actions: Ctrl-Alt-Delete, lock, restart")
     }
 
     /// First-class monitor switcher; only multi-monitor peers show it. The
@@ -176,7 +224,7 @@ struct RemoteSessionToolbar: View {
                             },
                             selection: callbacks.selectedMonitor, select: selectMonitor)
             } label: {
-                Label(monitorLabel, systemImage: "display")
+                Label(monitorLabel, systemImage: "display").padding(.leading, 6)
             }
             .fixedSize()
             .help(monitorLabel)
@@ -195,8 +243,8 @@ struct RemoteSessionToolbar: View {
         Button {
             displayScale = displayScale == .fit ? .actualSize : .fit
         } label: {
-            Label(L(displayScale.shortTitle),
-                  systemImage: displayScale == .fit ? "arrow.up.left.and.arrow.down.right" : "plus.magnifyingglass")
+            Image(systemName: displayScale == .fit ? "arrow.up.left.and.arrow.down.right" : "1.magnifyingglass")
+                .toolbarIcon()
         }
         .fixedSize()
         .disabled(!isConnected)
@@ -211,7 +259,8 @@ struct RemoteSessionToolbar: View {
             callbacks.setShowRemoteCursor?(!callbacks.showRemoteCursor)
         } label: {
             // eye/eye.slash exist on every supported macOS (SF Symbols 1/2).
-            Image(systemName: callbacks.showRemoteCursor ? "eye" : "eye.slash")
+            Image(systemName: callbacks.showRemoteCursor ? "cursorarrow" : "cursorarrow.slash")
+                .toolbarIcon()
         }
         .disabled(!isConnected || callbacks.setShowRemoteCursor == nil)
         .help(L(callbacks.showRemoteCursor ? "Hide remote cursor" : "Show remote cursor"))
@@ -225,6 +274,9 @@ struct RemoteSessionToolbar: View {
             menu.toggle("Smooth scaling", isOn: smoothScaling) { smoothScaling = $0 }
             menu.separator()
             menu.toggle("Send keyboard shortcuts to the other computer", isOn: forwardShortcuts) { forwardShortcuts = $0 }
+            if let setSwap = callbacks.setSwapCommandControl {
+                menu.toggle("Use ⌘ as Ctrl (Windows)", isOn: callbacks.swapCommandControl, action: setSwap)
+            }
             menu.toggle("View only", isOn: !controlEnabled, enabled: allowsControl) { controlEnabled = !$0 }
             if let setWallpaper = callbacks.setWallpaper {
                 menu.toggle("Show remote wallpaper", isOn: callbacks.wallpaperVisible,
@@ -254,9 +306,10 @@ struct RemoteSessionToolbar: View {
                 }
             }
         } label: {
-            Label("Configuration", systemImage: "gearshape")
+            Image(systemName: "slider.horizontal.3").padding(.leading, 6)
         }
         .fixedSize()
+        .help("Display, audio and image quality settings")
         .onChange(of: displayScale) { _ in callbacks.releaseInput() }
     }
 
@@ -296,10 +349,17 @@ struct RemoteSessionToolbar: View {
                 }
             }
         } label: {
-            Label(LocalizedStringKey(capture.isRecording ? "Recording" : "Capture"),
-                  systemImage: capture.isRecording ? "record.circle.fill" : "camera")
+            HStack(spacing: 4) {
+                Image(systemName: capture.isRecording ? "record.circle.fill" : "camera")
+                    .foregroundColor(capture.isRecording ? .red : .primary)
+                if capture.isRecording {
+                    Text("\(capture.recordingSeconds / 60):\(String(format: "%02d", capture.recordingSeconds % 60))")
+                        .digitsMonospaced().foregroundColor(.red)
+                }
+            }.padding(.leading, 6)
         }
         .fixedSize()
+        .help(LocalizedStringKey(capture.isRecording ? "Recording" : "Capture"))
     }
 }
 
@@ -318,6 +378,7 @@ extension RemoteSessionToolbar: @preconcurrency Equatable {
             && lhs.callbacks.computerAudioEnabled == rhs.callbacks.computerAudioEnabled
             && lhs.callbacks.isChangingAudio == rhs.callbacks.isChangingAudio
             && lhs.callbacks.showRemoteCursor == rhs.callbacks.showRemoteCursor
+            && lhs.callbacks.swapCommandControl == rhs.callbacks.swapCommandControl
     }
 }
 
@@ -365,4 +426,11 @@ extension RemoteMonitor {
     /// Menu-row detail showing the monitor's virtual-desktop offset. Numbers and
     /// punctuation only, so the localized label format needs no extra words.
     var menuPositionSuffix: String { " · (\(left), \(top))" }
+}
+
+private extension View {
+    /// Same hit area for every icon in the session toolbar.
+    func toolbarIcon() -> some View {
+        frame(width: 28, height: 24).contentShape(Rectangle())
+    }
 }

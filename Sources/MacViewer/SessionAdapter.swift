@@ -81,6 +81,8 @@ enum RemoteSessionEvent {
     case clipboard(String)
     case computerAudio(Data)
     case cursor(CursorMessage)
+    /// Round trip to the other computer, in milliseconds.
+    case latency(Double)
     /// The Windows computer offers a file; nothing is saved until it is accepted.
     case fileOffer(transferID: String, name: String, size: Int64)
     /// Bytes moved so far, in either direction.
@@ -116,6 +118,33 @@ enum RemoteInput: Sendable, Equatable {
     case modifiers(RemoteModifiers)
     /// Release held remote keys/buttons on focus loss, control toggle, or disconnect.
     case releaseAll
+}
+
+extension RemoteInput {
+    /// ⌘ is sent as Control, so Mac shortcuts like ⌘C reach Windows as
+    /// Ctrl+C. Control stays Control; mapping it to the Windows key would open
+    /// the Start menu on every lone Control press.
+    func sendingCommandAsControl() -> RemoteInput {
+        switch self {
+        case let .key(code, characters, pressed, modifiers):
+            let mapped: UInt16 = switch code {
+            case 0x37: 0x3b
+            case 0x36: 0x3e
+            default: code
+            }
+            return .key(keyCode: mapped, characters: characters, pressed: pressed,
+                        modifiers: modifiers.sendingCommandAsControl())
+        case let .modifiers(modifiers): return .modifiers(modifiers.sendingCommandAsControl())
+        default: return self
+        }
+    }
+}
+
+extension RemoteModifiers {
+    func sendingCommandAsControl() -> RemoteModifiers {
+        guard contains(.command) else { return self }
+        return subtracting(.command).union(.control)
+    }
 }
 
 enum NativeSessionError: LocalizedError {

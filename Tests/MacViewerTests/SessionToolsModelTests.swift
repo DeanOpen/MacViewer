@@ -42,7 +42,23 @@ struct SessionToolsModelTests {
         #expect(sharing.first == true)
     }
 
-    @Test("Clipboard sharing is off by default: nothing is sent and the Mac clipboard is untouched")
+    @Test("Clipboard sharing is on by default for a new session")
+    func clipboardOnByDefault() async throws {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let suite = "SessionToolsModelTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = SessionToolsModel(pasteboard: board, defaults: defaults)
+        var sharing: [Bool] = []
+        model.activate(sendChat: { _ in }, sendClipboard: { _ in }, setSharing: { sharing.append($0) })
+        for _ in 0..<100 where !model.clipboardEnabled { await Task.yield() }
+        #expect(model.clipboardEnabled)
+        #expect(sharing.first == true)
+        model.deactivate()
+    }
+
+    @Test("With clipboard sharing turned off, nothing is sent and the Mac clipboard is untouched")
     func clipboardOffByDefault() async throws {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
@@ -50,6 +66,7 @@ struct SessionToolsModelTests {
         let suite = "SessionToolsModelTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: SessionToolsModel.shareClipboardKey)
         let model = SessionToolsModel(pasteboard: board, defaults: defaults)
         var sent: [String] = [], sharing: [Bool] = []
         model.activate(sendChat: { _ in }, sendClipboard: { sent.append($0) }, setSharing: { sharing.append($0) })
@@ -72,6 +89,7 @@ struct SessionToolsModelTests {
         let suite = "SessionToolsModelTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: SessionToolsModel.shareClipboardKey)
         let model = SessionToolsModel(pasteboard: board, defaults: defaults)
         #expect(!model.showsClipboardHint)
         model.activate(sendChat: { _ in }, sendClipboard: { _ in }, setSharing: { _ in })

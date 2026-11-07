@@ -47,7 +47,9 @@ final class AgentBridge: ObservableObject, MCPToolHost {
     /// Set by Stop; agent input is refused until this remote session ends.
     @Published private(set) var isStoppedForSession = false
 
-    private let model: ConnectionModel
+    private let sessionList: SessionsModel
+    /// Agents act on the shown tab, else the newest session.
+    private var model: ConnectionModel { sessionList.current }
     private let defaults: UserDefaults
     private let server: MCPSocketServer
     private var sessions: [MCPSocketServer.ConnectionID: MCPSession] = [:]
@@ -63,8 +65,8 @@ final class AgentBridge: ObservableObject, MCPToolHost {
     /// client may request a different screenshot width.
     private var clientScales = MCPClientScale()
 
-    init(model: ConnectionModel, defaults: UserDefaults = .standard, server: MCPSocketServer = MCPSocketServer()) {
-        self.model = model
+    init(sessions: SessionsModel, defaults: UserDefaults = .standard, server: MCPSocketServer = MCPSocketServer()) {
+        self.sessionList = sessions
         self.defaults = defaults
         self.server = server
         defaults.register(defaults: [Self.enabledKey: false, Self.allowScreenKey: true, Self.allowInputKey: false,
@@ -78,8 +80,11 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         server.onConnect = { [weak self] id, program in Task { @MainActor in self?.opened(id, program: program) } }
         server.onLine = { [weak self] id, line in Task { @MainActor in self?.queues[id]?.yield(line) } }
         server.onClose = { [weak self] id in Task { @MainActor in self?.closed(id) } }
-        phaseObserver = model.$phase.sink { [weak self] phase in
-            if phase != .connected && phase != .connecting { self?.isStoppedForSession = false }
+        phaseObserver = sessionList.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.sessionList.hasActiveSession else { return }
+                self.isStoppedForSession = false
+            }
         }
     }
 
@@ -334,15 +339,12 @@ final class AgentBridge: ObservableObject, MCPToolHost {
 
     private func connect(_ arguments: JSONValue) async -> MCPToolResult {
         guard allowConnect else { return .error(MCPToolGate.connectDenied) }
-        guard !model.isSessionActive else { return .error("MacViewer is already in a session. Disconnect first.") }
         let identifier = (arguments["partner_id"]?.stringValue ?? "").filter { !$0.isWhitespace && $0 != "-" }
         guard !identifier.isEmpty else { return .error("Give the partner ID.") }
-        model.partnerID = identifier
-        if let password = arguments["password"]?.stringValue, !password.isEmpty { model.password = password }
-        guard !model.password.isEmpty else {
-            return .error("No password is saved for \(identifier) on this Mac. Pass the password.")
+        guard let model = sessionList.connect(partnerID: identifier,
+                                           password: arguments["password"]?.stringValue ?? "") else {
+            return .error(L(sessionList.formError ?? "No password is saved for \(identifier) on this Mac. Pass the password."))
         }
-        model.connect()
         for _ in 0..<450 where model.phase == .connecting {
             try? await Task.sleep(seconds: 0.1)
         }

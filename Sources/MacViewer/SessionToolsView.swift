@@ -12,6 +12,8 @@ struct SessionToolsButton: View {
     var onOpen: () -> Void = {}
     /// When set, the button toggles an in-window sidebar instead of the floating window.
     var toggleSidebar: (() -> Void)? = nil
+    /// Icon with an unread-style badge, for the session toolbar.
+    var compact = false
 
     var body: some View {
         Button {
@@ -19,6 +21,18 @@ struct SessionToolsButton: View {
             if let toggleSidebar { toggleSidebar() }
             else { MacChatWindowController.shared.show(tools, name: peerName, context: context) }
         } label: {
+            if compact {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .overlay(Group {
+                        if !tools.messages.isEmpty {
+                            Text(tools.messages.count > 99 ? "99+" : String(tools.messages.count))
+                                .font(.system(size: 8, weight: .bold)).digitsMonospaced()
+                                .foregroundColor(.white).padding(.horizontal, 3).frame(minWidth: 12, minHeight: 12)
+                                .shapeBackground(Color.accentColor, in: Capsule())
+                                .offset(x: 8, y: -6)
+                        }
+                    }, alignment: .topTrailing)
+            } else {
             HStack(spacing: 6) {
                 Label(LocalizedStringKey(title), systemImage: "bubble.left.and.bubble.right")
                 if !tools.messages.isEmpty {
@@ -26,6 +40,7 @@ struct SessionToolsButton: View {
                         .font(.caption2.weight(.semibold)).digitsMonospaced()
                         .foregroundColor(.secondary)
                 }
+            }
             }
         }
         .disabled(!tools.isActive)
@@ -361,6 +376,8 @@ struct SessionToolsView: View {
 @MainActor
 struct SessionClipboardButton: View {
     @ObservedObject var tools: SessionToolsModel
+    /// Icon only, for the session toolbar; the tooltip carries the status.
+    var compact = false
     @State private var showList = false
 
     var body: some View {
@@ -368,9 +385,11 @@ struct SessionClipboardButton: View {
             HStack(spacing: 4) {
                 Image(systemName: tools.clipboardEnabled ? "doc.on.clipboard.fill" : "doc.on.clipboard")
                     .foregroundColor(tools.clipboardEnabled ? .green : .secondary)
+                if !compact || tools.clipboardNotice != nil {
                 Text(LocalizedStringKey(tools.clipboardNotice ?? (tools.showsClipboardHint ? "Clipboard off" : "Clipboard")))
                     .foregroundColor(tools.clipboardNotice == nil ? .primary : Color.green)
                     .lineLimit(1)
+                }
             }
             .animation(.easeInOut(duration: 0.2), value: tools.clipboardNotice)
         }

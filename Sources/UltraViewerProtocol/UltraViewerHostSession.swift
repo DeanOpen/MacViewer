@@ -316,16 +316,20 @@ public actor UltraViewerHostSession {
         guard running, generation == token, let config = configuration else { return }
         do {
             try emit(.status("Getting this Mac’s UltraViewer ID…"))
-            let opened = try await RelayCommandConnection.open(host: config.commandHost, port: config.listenerPort,
+            let opened = try await RelayCommandConnection.openRegistered(host: config.commandHost,
+                port: config.listenerPort,
                 security: .tls(serverName: "ultraviewer", certificateName: "functions3.ultraviewer.net"),
-                initialRequest: RelayHTTPPreamble.request(host: "functions3.ultraviewer.net"), expectsHTTPResponse: true)
+                initialRequest: RelayHTTPPreamble.request(host: "functions3.ultraviewer.net"),
+                registration: try config.registration.relayEnvelope(cipher: .desktopServerCommands))
             let transport = opened.transport, stream = opened.stream
             guard running, generation == token else { await transport.close(); return }
             command = transport
             registrationDeadline = Task { [weak self] in
                 do { try await Task.sleep(seconds: 20); await self?.registrationExpired(token) } catch {}
             }
-            try await transport.send(config.registration.relayEnvelope(cipher: .desktopServerCommands))
+            if case let .system(payload) = try RelayEnvelope.decode(opened.firstFrame) {
+                try await consumeCommand(payload, token: token)
+            }
             for try await bytes in stream {
                 guard running, generation == token else { return }
                 if case let .system(payload) = try RelayEnvelope.decode(bytes) {

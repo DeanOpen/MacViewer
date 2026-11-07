@@ -87,6 +87,7 @@ final class NativeUltraViewerAdapter: MacViewerSessionAdapter {
                     case let .clipboard(text): pair.continuation.yield(.clipboard(text))
                     case let .computerAudio(pcm): pair.continuation.yield(.computerAudio(pcm))
                     case let .cursor(cursor): pair.continuation.yield(.cursor(cursor))
+                    case let .latency(milliseconds): pair.continuation.yield(.latency(milliseconds))
                     case .sideSwitchRequested: break
                     case let .inputPermission(allowed):
                         self.allowsInput = allowed

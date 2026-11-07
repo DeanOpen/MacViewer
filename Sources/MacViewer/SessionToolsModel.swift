@@ -83,7 +83,7 @@ final class SessionToolsModel: ObservableObject {
     init(pasteboard: NSPasteboard = .general, defaults: UserDefaults = .standard) {
         self.pasteboard = pasteboard
         self.defaults = defaults
-        defaults.register(defaults: [Self.shareClipboardKey: false])
+        defaults.register(defaults: [Self.shareClipboardKey: true])
     }
 
     func activate(sendChat: @escaping SendText, sendClipboard: @escaping SendText,

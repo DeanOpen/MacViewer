@@ -56,6 +56,8 @@ public actor UltraViewerRelaySession {
         case clipboard(String)
         case computerAudio(Data)
         case cursor(CursorMessage)
+        /// Round trip of the latest peer ping, in milliseconds.
+        case latency(Double)
         case sideSwitchRequested(RemoteControlCommands.SideSwitchRequest)
         case fileOffer(FileTransferOffer)
         /// Bytes moved so far for a transfer in either direction.
@@ -335,15 +337,17 @@ public actor UltraViewerRelaySession {
         guard generation == token, phase == .registering else { return }
         do {
             try emit(.status("Registering this Mac…"))
-            let opened = try await RelayCommandConnection.open(host: config.commandHost, port: config.listenerPort,
+            armDeadline(token, seconds: 45)
+            let opened = try await RelayCommandConnection.openRegistered(host: config.commandHost,
+                port: config.listenerPort,
                 security: .tls(serverName: "ultraviewer", certificateName: "functions3.ultraviewer.net"),
                 initialRequest: RelayHTTPPreamble.request(host: "functions3.ultraviewer.net"),
-                expectsHTTPResponse: true)
+                registration: try config.registration.relayEnvelope(cipher: .desktopServerCommands))
             let transport = opened.transport, stream = opened.stream
             guard generation == token, phase != .closed else { await transport.close(); return }
             commandTransport = transport
             armDeadline(token)
-            try await transport.send(config.registration.relayEnvelope(cipher: .desktopServerCommands))
+            try await consumeCommand(opened.firstFrame, token: token)
             for try await frame in stream {
                 try Task.checkCancellation()
                 guard generation == token, phase != .closed else { return }
@@ -836,9 +840,12 @@ public actor UltraViewerRelaySession {
             diagnostics.peerAccepted = true
             if heartbeat == nil {
                 heartbeat = Task { [weak self] in
+                    // The first ping comes soon so the latency shows right away.
+                    var interval: TimeInterval = 2
                     while !Task.isCancelled {
                         do {
-                            try await Task.sleep(seconds: 10)
+                            try await Task.sleep(seconds: interval)
+                            interval = 10
                             await self?.sendHeartbeat(token)
                         } catch { return }
                     }
@@ -901,8 +908,10 @@ public actor UltraViewerRelaySession {
             }
         case 20:
             if let started = peerPingStarted {
-                diagnostics.peerRoundTripMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+                let milliseconds = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+                diagnostics.peerRoundTripMilliseconds = milliseconds
                 peerPingStarted = nil
+                try? emit(.latency(milliseconds))
             }
         case 23:
             guard phase == .active else { return }

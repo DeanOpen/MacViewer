@@ -902,3 +902,18 @@ private final class ModelTestAudio: RemoteAudioPlayback {
     func play(_ pcm: Data) throws { received.append(pcm) }
     func stop() { enabled = false }
 }
+
+struct CommandAsControlTests {
+    @Test("⌘ keys and flags reach the peer as Control; Control and other keys are unchanged")
+    func mapsCommandToControl() {
+        #expect(RemoteInput.key(keyCode: 0x37, characters: nil, pressed: true, modifiers: [.command])
+            .sendingCommandAsControl() == .key(keyCode: 0x3b, characters: nil, pressed: true, modifiers: [.control]))
+        #expect(RemoteInput.key(keyCode: 0x36, characters: nil, pressed: false, modifiers: [])
+            .sendingCommandAsControl() == .key(keyCode: 0x3e, characters: nil, pressed: false, modifiers: []))
+        #expect(RemoteInput.key(keyCode: 0x08, characters: "c", pressed: true, modifiers: [.command, .shift])
+            .sendingCommandAsControl() == .key(keyCode: 0x08, characters: "c", pressed: true, modifiers: [.control, .shift]))
+        #expect(RemoteInput.key(keyCode: 0x3b, characters: nil, pressed: true, modifiers: [.control])
+            .sendingCommandAsControl() == .key(keyCode: 0x3b, characters: nil, pressed: true, modifiers: [.control]))
+        #expect(RemoteInput.modifiers([.command]).sendingCommandAsControl() == .modifiers([.control]))
+    }
+}

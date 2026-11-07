@@ -8,12 +8,15 @@ public enum RelayCommandConnection {
         case invalidHost
         case dnsLookupFailed(Int32)
         case noIPv4Addresses
+        case registrationUnanswered
 
         public var errorDescription: String? {
             switch self {
             case .invalidHost: "The UltraViewer service address is invalid."
             case .dnsLookupFailed, .noIPv4Addresses:
                 "The UltraViewer service address could not be resolved. Check the connection and try again."
+            case .registrationUnanswered:
+                "The UltraViewer ID servers did not answer. Try again in a moment."
             }
         }
     }
@@ -40,6 +43,52 @@ public enum RelayCommandConnection {
                     expectsHTTPResponse: attempt.expectsHTTPResponse, timeout: attempt.timeout)
             }, closeConnection: { await $0.close() })
         return (result.connection, result.stream)
+    }
+
+    /// Some ID servers accept TLS but never answer the registration. Send it to
+    /// each resolved server in turn and keep the first one that replies.
+    public static func openRegistered(
+        host: String,
+        port: UInt16,
+        security: FramedTCPTransport.Security,
+        initialRequest: Data?,
+        registration: Data,
+        replyTimeout: TimeInterval = 6
+    ) async throws -> (transport: FramedTCPTransport, stream: AsyncThrowingStream<Data, any Swift.Error>,
+                       firstFrame: Data) {
+        var lastError: (any Swift.Error)?
+        for address in try await resolveIPv4(host: host) {
+            try Task.checkCancellation()
+            let opened: (transport: FramedTCPTransport, stream: AsyncThrowingStream<Data, any Swift.Error>)
+            do {
+                opened = try await open(host: address, port: port, security: security,
+                    initialRequest: initialRequest, expectsHTTPResponse: true)
+            } catch {
+                if error is CancellationError { throw error }
+                lastError = error
+                continue
+            }
+            let transport = opened.transport
+            let timer = Task {
+                try await Task.sleep(seconds: replyTimeout)
+                await transport.close()
+            }
+            do {
+                try await transport.send(registration)
+                var frames = opened.stream.makeAsyncIterator()
+                let first = try await frames.next()
+                timer.cancel()
+                if let first { return (transport, opened.stream, first) }
+                lastError = Error.registrationUnanswered
+            } catch {
+                timer.cancel()
+                await transport.close()
+                try Task.checkCancellation()
+                lastError = error
+            }
+        }
+        try Task.checkCancellation()
+        throw lastError ?? Error.noIPv4Addresses
     }
 
     /// IPv4 literals bypass DNS. Blocking getaddrinfo runs on a utility queue;

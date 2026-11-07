@@ -39,6 +39,11 @@ final class ConnectionModel: ObservableObject {
     private static let recentPartnersKey = "MacViewer.recentPartners"
     private static let partnerNamesKey = "MacViewer.partnerNames"
 
+    /// Per-partner ⌘ → Control mapping; on unless turned off for that computer.
+    static func swapCommandControlKey(for partnerID: String) -> String {
+        "MacViewer.swapCommandControl.\(partnerID)"
+    }
+
     /// Per-partner monitor choice; 0 means "all monitors". Kept on this Mac only.
     static func selectedMonitorKey(for partnerID: String) -> String {
         "MacViewer.selectedMonitor.\(partnerID)"
@@ -91,6 +96,10 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var computerAudioEnabled = false
     @Published private(set) var isChangingAudio = false
     @Published private(set) var showRemoteCursor = true
+    /// Latest round trip to the other computer, or nil before the first ping.
+    @Published private(set) var pingMilliseconds: Int?
+    /// Mac shortcuts reach the other computer with Control (⌘C → Ctrl+C).
+    @Published private(set) var swapCommandControl = true
     /// Explains that this peer version cannot receive keyboard messages; the UI
     /// must not claim working typing while the encoder drops every key.
     @Published private(set) var keyboardNotice: String?
@@ -196,8 +205,10 @@ final class ConnectionModel: ObservableObject {
         let suppliedPassword = password
         password = ""
         partnerID = identifier
+        swapCommandControl = defaults.object(forKey: Self.swapCommandControlKey(for: identifier)) as? Bool ?? true
         errorMessage = nil
         credentialMessage = nil
+        pingMilliseconds = nil
         remoteInfo = nil
         frame = nil
         displayedFrame = nil; selectedMonitor = 0
@@ -252,6 +263,7 @@ final class ConnectionModel: ObservableObject {
         tools.deactivate()
         adapter.disconnect()
         phase = .disconnected
+        pingMilliseconds = nil
         status = "You disconnected from the remote computer."
         frame = nil
         displayedFrame = nil
@@ -294,7 +306,15 @@ final class ConnectionModel: ObservableObject {
             default: translated = input
             }
         } else { translated = input }
-        enqueueInput(translated)
+        enqueueInput(swapCommandControl ? translated.sendingCommandAsControl() : translated)
+    }
+
+    func setSwapCommandControl(_ enabled: Bool) {
+        guard enabled != swapCommandControl else { return }
+        // Release keys held under the old mapping before it changes.
+        if phase == .connected, controlEnabled { enqueueInput(.releaseAll) }
+        swapCommandControl = enabled
+        defaults.set(enabled, forKey: Self.swapCommandControlKey(for: normalizedPartnerID))
     }
 
     func selectMonitor(_ index: Int) {
@@ -529,6 +549,17 @@ final class ConnectionModel: ObservableObject {
         defaults.removeObject(forKey: Self.partnerNamesKey)
     }
 
+    /// Re-reads history and nicknames that another session's model changed.
+    func reloadHistory() {
+        recentPartners = defaults.bool(forKey: Self.rememberPartnersKey)
+            ? Array((defaults.stringArray(forKey: Self.recentPartnersKey) ?? []).prefix(10))
+            : []
+        partnerNames = defaults.dictionary(forKey: Self.partnerNamesKey) as? [String: String] ?? [:]
+    }
+
+    /// The ID this model connects to, without spaces or dashes.
+    var normalizedTarget: String { normalizedPartnerID }
+
     func partnerName(_ identifier: String) -> String? {
         partnerNames[Self.normalizeID(identifier)]
     }
@@ -668,6 +699,9 @@ final class ConnectionModel: ObservableObject {
             guard phase == .connected, computerAudioEnabled else { return }
             do { try audioPlayer.play(pcm) }
             catch { audioPlaybackFailed(error) }
+        case let .latency(milliseconds):
+            guard phase == .connected else { return }
+            pingMilliseconds = Int(milliseconds.rounded())
         case let .cursor(message):
             guard phase == .connected else { return }
             if let hash = cursorPresenter.consume(message) {
@@ -696,6 +730,7 @@ final class ConnectionModel: ObservableObject {
         cursorPresenter.reset(); remoteCursor = nil
         tools.deactivate()
         adapter.disconnect()
+        pingMilliseconds = nil
         phase = .disconnected
         status = hadConnected ? "The remote session ended with an error." : "The connection could not be established."
         errorMessage = connectionErrorText(error)
