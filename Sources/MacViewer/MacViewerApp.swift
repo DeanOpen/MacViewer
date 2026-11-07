@@ -46,7 +46,7 @@ struct MacViewerApp: App {
                 Button(L("Connect")) { sessions.connectFromForm() }
                     .keyboardShortcut("k", modifiers: [.command])
                     .disabled(!model.canConnect)
-                Button(L("Disconnect")) { sessions.selected?.disconnect() }
+                Button(L("Disconnect")) { if let session = sessions.selected { sessions.close(session) } }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
                     .disabled(sessions.selected?.isSessionActive != true)
                 Divider()

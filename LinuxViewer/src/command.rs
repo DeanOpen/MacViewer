@@ -15,6 +15,9 @@ pub const COMMAND_HOST: &str = "functions3.ultraviewer.net";
 pub const COMMAND_PORT: u16 = 443;
 /// Deadline for the `3:` and `8:` replies (Swift armDeadline).
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(20);
+/// Command 60 answers the registration with a security check (the Windows
+/// client's CAPTCHA) that LinuxViewer cannot show yet.
+pub const VERIFICATION_REQUIRED: &str = "UltraViewer is asking this computer for a security check that LinuxViewer cannot show yet. This can happen after many connections in a short time. Wait a while and try again.";
 /// How long one ID server gets to answer the registration.
 pub const SERVER_REPLY_TIMEOUT: Duration = Duration::from_secs(6);
 /// frmMain.tmPingServer interval.
@@ -43,6 +46,8 @@ impl CommandConnection {
         for addr in tls::resolve_ipv4(COMMAND_HOST, COMMAND_PORT)? {
             match Self::register_at(&addr.ip().to_string(), text.as_bytes()) {
                 Ok(connection) => return Ok(connection),
+                // Every server asks the same check; trying others does not help.
+                Err(e) if e.to_string() == VERIFICATION_REQUIRED => return Err(e),
                 Err(e) => last = Some(e),
             }
         }
@@ -60,6 +65,10 @@ impl CommandConnection {
                 sender.shutdown();
                 return Err("The UltraViewer ID servers did not answer. Try again in a moment.".into());
             };
+            if payload.starts_with(b"60:") {
+                sender.shutdown();
+                return Err(VERIFICATION_REQUIRED.into());
+            }
             if payload.starts_with(b"3:") {
                 let reply = messages::parse_registration_reply(&payload)?;
                 return Ok(CommandConnection { reader, sender, reply });

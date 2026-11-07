@@ -257,7 +257,7 @@ final class AgentBridge: ObservableObject, MCPToolHost {
         case "disconnect":
             guard allowConnect else { return .error(MCPToolGate.connectDenied) }
             guard model.isSessionActive else { return .text("There is no active session.") }
-            model.disconnect()
+            sessionList.close(model)
             return .text("Disconnected.")
         case "screenshot": return await screenshot(arguments, client: client)
         case "select_monitor":

@@ -74,6 +74,7 @@ public actor UltraViewerHostSession {
     }
     public enum Failure: Swift.Error, LocalizedError {
         case alreadyRunning, notConnected, relayUnavailable, timedOut, slowConsumer, unsupportedDisplay
+        case verificationRequired
         public var errorDescription: String? {
             switch self {
             case .alreadyRunning: "Incoming access is already running."
@@ -82,6 +83,7 @@ public actor UltraViewerHostSession {
             case .timedOut: "The incoming UltraViewer connection timed out."
             case .slowConsumer: "The incoming session could not process its updates."
             case .unsupportedDisplay: "The Windows viewer requested an unsupported screen color mode. Use 16-bit color."
+            case .verificationRequired: UltraViewerVerification.message
             }
         }
     }
@@ -343,6 +345,7 @@ public actor UltraViewerHostSession {
     private func consumeCommand(_ payload: Data, token: UUID) async throws {
         let tag = Self.systemTag(payload)
         if diagnostics.systemCommands.count < 128 { diagnostics.systemCommands.append(tag) }
+        if tag == "60", !diagnostics.registered { throw Failure.verificationRequired }
         if tag == "3", !diagnostics.registered {
             let reply = try ClientRegistration.Reply.parse(payload)
             defaultRelayAddresses = reply.pingList

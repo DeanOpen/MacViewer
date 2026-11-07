@@ -589,3 +589,13 @@
 "Round trip to the other computer: %ld ms" = "Thời gian khứ hồi tới máy kia: %ld ms";
 "Connect to a computer" = "Kết nối tới máy tính";
 "Enter the ID and password shown in UltraViewer on the other computer." = "Nhập ID và mật khẩu hiển thị trong UltraViewer trên máy kia.";
+"UltraViewer is asking this Mac for a security check that MacViewer cannot show yet. This can happen after many connections in a short time. Wait a while and try again." = "UltraViewer đang yêu cầu máy Mac này kiểm tra bảo mật mà MacViewer chưa hiển thị được. Điều này có thể xảy ra sau nhiều lần kết nối trong thời gian ngắn. Hãy đợi một lúc rồi thử lại.";
+"The Windows connection timed out." = "Kết nối tới máy Windows đã hết thời gian chờ.";
+"UltraViewer rejected the partner password." = "UltraViewer từ chối mật khẩu đối tác.";
+"UltraViewer returned an incomplete partner address." = "UltraViewer trả về địa chỉ đối tác không đầy đủ.";
+"The Windows computer blocked this connection." = "Máy Windows đã chặn kết nối này.";
+"This Windows UltraViewer version is not supported yet." = "Phiên bản UltraViewer trên Windows này chưa được hỗ trợ.";
+"The Windows computer returned incomplete screen information." = "Máy Windows trả về thông tin màn hình không đầy đủ.";
+"The Windows computer has enabled view-only access." = "Máy Windows đã bật chế độ chỉ xem.";
+"The UltraViewer service address is invalid." = "Địa chỉ dịch vụ UltraViewer không hợp lệ.";
+"The UltraViewer service address could not be resolved. Check the connection and try again." = "Không phân giải được địa chỉ dịch vụ UltraViewer. Kiểm tra kết nối rồi thử lại.";

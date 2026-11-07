@@ -4,6 +4,8 @@ import SwiftUI
 struct SessionProgressView: View {
     let phase: ConnectionModel.Phase
     let status: String
+    /// Why the session ended, shown instead of the status when present.
+    var error: String? = nil
     let cancel: () -> Void
     let back: () -> Void
 
@@ -101,9 +103,10 @@ struct SessionProgressView: View {
     private var endedCard: some View {
         VStack(spacing: 14) {
             Image(systemName: "bolt.horizontal.circle").font(.system(size: 34)).foregroundColor(.secondary)
-            Text(L(status)).multilineTextAlignment(.center).foregroundColor(.secondary)
+            Text(L(error ?? status)).multilineTextAlignment(.center)
+                .foregroundColor(error == nil ? .secondary : .primary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(L("Back"), action: back)
+            Button(L("Close tab"), action: back)
         }
         .frame(maxWidth: .infinity)
     }

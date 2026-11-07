@@ -47,7 +47,7 @@ struct ConnectionView: View {
         .onAppear {
             focusRequest = .partner
             hosting.onApprovedSideSwitch = { id, password in
-                sessions.activeSession(for: id)?.disconnect()
+                if let session = sessions.activeSession(for: id) { sessions.close(session) }
                 sessions.connect(partnerID: id, password: password)
             }
         }
@@ -234,7 +234,7 @@ struct ConnectionView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeading("Open sessions", detail: "Every session stays connected. Switch between them with the tabs above.") {
                 if sessions.sessions.count > 1 {
-                    RoleButton("Disconnect all", role: .destructive, action: sessions.disconnectAll)
+                    RoleButton("Disconnect all", role: .destructive, action: sessions.closeAll)
                         .buttonStyle(.borderless).font(.caption)
                 }
             }
@@ -242,7 +242,7 @@ struct ConnectionView: View {
                 ForEach(Array(sessions.sessions.enumerated()), id: \.offset) { _, session in
                     ActiveSessionTile(session: session, name: model.partnerName(session.partnerID),
                                       formattedID: formattedID(session.normalizedTarget),
-                                      show: { sessions.select(session) })
+                                      show: { sessions.select(session) }, close: { sessions.close(session) })
                 }
             }
         }
@@ -624,6 +624,7 @@ private struct ActiveSessionTile: View {
     let name: String?
     let formattedID: String
     let show: () -> Void
+    let close: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -646,7 +647,7 @@ private struct ActiveSessionTile: View {
             Spacer(minLength: 4)
             Button("Show", action: show).buttonStyle(.bordered).controlSize(.small)
             if session.isSessionActive {
-                Button(action: session.disconnect) { Image(systemName: "power") }
+                Button(action: close) { Image(systemName: "power") }
                     .buttonStyle(.borderless).foregroundColor(.red)
                     .help("Disconnect")
             }
@@ -743,8 +744,7 @@ private struct SessionTab: View {
         .onHover { hovering = $0 }
         .help(L(session.status))
         .contextMenu {
-            Button("Disconnect", action: session.disconnect).disabled(!session.isSessionActive)
-            Button("Close tab", action: close)
+            Button("Disconnect and close this tab", action: close)
         }
     }
 

@@ -113,7 +113,7 @@ struct RemoteSessionView: View {
                 tools: model.tools, capture: remoteCapture, hasImage: model.displayedSize != nil,
                 currentImage: { model.displayedFrame?.image },
                 callbacks: .init(home: { model.releaseRemoteInput(); showDashboard() },
-                                 disconnect: model.disconnect, releaseInput: model.releaseRemoteInput,
+                                 disconnect: close, releaseInput: model.releaseRemoteInput,
                                  secureAttention: { model.performRemoteAction(.controlAltDelete) },
                                  lockScreen: { model.performRemoteAction(.lockScreen) },
                                  restart: { model.performRemoteAction(.restart) },
@@ -136,7 +136,8 @@ struct RemoteSessionView: View {
             .equatable()
             Divider()
             }
-            if let error = model.errorMessage { errorLabel(error).padding(16) }
+            // Once the session has ended, the card in the middle shows the reason.
+            if let error = model.errorMessage, model.isSessionActive { errorLabel(error).padding(16) }
             if let notice = model.monitorNotice { sessionNoticeLabel(notice, symbol: "display").padding(.horizontal, 16).padding(.vertical, 8) }
             if let notice = model.keyboardNotice { sessionNoticeLabel(notice, symbol: "keyboard").padding(.horizontal, 16).padding(.vertical, 8) }
             HStack(spacing: 0) {
@@ -147,8 +148,8 @@ struct RemoteSessionView: View {
                                              inputEnabled: model.controlEnabled,
                                              onSessionDigit: selectMonitorFromDigit, onInput: model.send)
                     } else {
-                        SessionProgressView(phase: model.phase, status: model.status,
-                                            cancel: model.disconnect,
+                        SessionProgressView(phase: model.phase, status: model.status, error: model.errorMessage,
+                                            cancel: close,
                                             back: close)
                     }
                 }

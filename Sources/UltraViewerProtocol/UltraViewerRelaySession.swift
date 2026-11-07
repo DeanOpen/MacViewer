@@ -5,6 +5,7 @@ import Darwin
 /// Relay session with an optional encrypted LAN candidate. Ordinary partner
 /// Login and complete initialization are required on either selected channel.
 public actor UltraViewerRelaySession {
+    private static let log = Logger(subsystem: "dev.macviewer.app", category: "session")
     public struct Configuration: Sendable {
         public var registration: ClientRegistration.Request
         public var commandHost: String
@@ -112,6 +113,9 @@ public actor UltraViewerRelaySession {
         /// The Windows computer sent an explicit end-of-session command.
         case endedByPeer
         case wrongPassword, lookupRejected(Int32), invalidLookupRoute, partnerBlocked
+        /// The ID server answered the registration with command 60, a security
+        /// check (the Windows client's CAPTCHA) that MacViewer cannot show yet.
+        case verificationRequired
         case unsupportedVersion, malformedInitialization, consumerTooSlow, viewOnly
 
         public var errorDescription: String? {
@@ -128,6 +132,7 @@ public actor UltraViewerRelaySession {
             case let .lookupRejected(code): "UltraViewer declined the partner lookup (code \(code))."
             case .invalidLookupRoute: "UltraViewer returned an incomplete partner address."
             case .partnerBlocked: "The Windows computer blocked this connection."
+            case .verificationRequired: UltraViewerVerification.message
             case .unsupportedVersion: "This Windows UltraViewer version is not supported yet."
             case .malformedInitialization: "The Windows computer returned incomplete screen information."
             case .consumerTooSlow: "The remote session could not deliver its status updates."
@@ -384,7 +389,15 @@ public actor UltraViewerRelaySession {
 
     private func consumeCommand(_ bytes: Data, token: UUID) async throws {
         guard case let .system(payload) = try RelayEnvelope.decode(bytes),
-              let config = configuration else { return }
+              let config = configuration else {
+            Self.log.notice("Command frame without a system payload in phase \(String(describing: self.phase), privacy: .public)")
+            return
+        }
+        // Only the command tag; the rest can carry IDs and addresses.
+        Self.log.notice("Command \(String(decoding: payload.prefix { $0 != 58 }.prefix(4), as: UTF8.self), privacy: .public) in phase \(String(describing: self.phase), privacy: .public)")
+        if phase == .registering, payload.starts(with: Data("60:".utf8)) {
+            throw Failure.verificationRequired
+        }
         if phase == .registering, payload.starts(with: Data("3:".utf8)) {
             let reply = try ClientRegistration.Reply.parse(payload)
             registrationReply = reply
@@ -1088,6 +1101,7 @@ public actor UltraViewerRelaySession {
     }
 
     private func emit(_ event: Event) throws {
+        if case let .status(text) = event { Self.log.notice("Status: \(text, privacy: .public)") }
         switch events?.yield(event) {
         case .terminated: throw CancellationError()
         case .dropped:
@@ -1104,6 +1118,7 @@ public actor UltraViewerRelaySession {
 
     private func finish(_ error: (any Swift.Error)?) async {
         guard phase != .closed else { return }
+        Self.log.notice("Session ended in phase \(String(describing: self.phase), privacy: .public): \(error.map { String(describing: $0) } ?? "closed", privacy: .public)")
         phase = .closed
         diagnostics.closeReason = error.map { String(describing: $0) }
         files.reset(); fileOutbox.removeAll(); fileSendRevision = UUID(); fileSending = false
@@ -1217,4 +1232,9 @@ public actor UltraViewerRelaySession {
         guard values.count == 3, values.allSatisfy({ $0 >= 0 }) else { return false }
         return !values.lexicographicallyPrecedes(required)
     }
+}
+
+/// Shared by the viewer and host sessions.
+public enum UltraViewerVerification {
+    public static let message = "UltraViewer is asking this Mac for a security check that MacViewer cannot show yet. This can happen after many connections in a short time. Wait a while and try again."
 }

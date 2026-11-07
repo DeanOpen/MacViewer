@@ -589,3 +589,13 @@
 "Round trip to the other computer: %ld ms" = "Round trip to the other computer: %ld ms";
 "Connect to a computer" = "Connect to a computer";
 "Enter the ID and password shown in UltraViewer on the other computer." = "Enter the ID and password shown in UltraViewer on the other computer.";
+"UltraViewer is asking this Mac for a security check that MacViewer cannot show yet. This can happen after many connections in a short time. Wait a while and try again." = "UltraViewer is asking this Mac for a security check that MacViewer cannot show yet. This can happen after many connections in a short time. Wait a while and try again.";
+"The Windows connection timed out." = "The Windows connection timed out.";
+"UltraViewer rejected the partner password." = "UltraViewer rejected the partner password.";
+"UltraViewer returned an incomplete partner address." = "UltraViewer returned an incomplete partner address.";
+"The Windows computer blocked this connection." = "The Windows computer blocked this connection.";
+"This Windows UltraViewer version is not supported yet." = "This Windows UltraViewer version is not supported yet.";
+"The Windows computer returned incomplete screen information." = "The Windows computer returned incomplete screen information.";
+"The Windows computer has enabled view-only access." = "The Windows computer has enabled view-only access.";
+"The UltraViewer service address is invalid." = "The UltraViewer service address is invalid.";
+"The UltraViewer service address could not be resolved. Check the connection and try again." = "The UltraViewer service address could not be resolved. Check the connection and try again.";

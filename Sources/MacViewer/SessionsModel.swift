@@ -93,6 +93,11 @@ final class SessionsModel: ObservableObject {
         select(tabs[(index + offset + tabs.count) % tabs.count])
     }
 
+    /// Disconnects every session and closes all tabs.
+    func closeAll() {
+        for model in sessions { close(model) }
+    }
+
     func disconnectAll() {
         for model in sessions { model.disconnect() }
     }
