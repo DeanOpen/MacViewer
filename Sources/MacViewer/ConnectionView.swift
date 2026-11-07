@@ -145,14 +145,6 @@ struct ConnectionView: View {
             SessionToolsButton(tools: hosting.tools, peerName: incomingPeerName,
                                title: "Incoming chat", context: "Incoming", compact: true)
                 .buttonStyle(.borderless).controlSize(.small)
-        } else {
-            HStack(spacing: 5) {
-                Circle().fill(hosting.isRunning ? Color.green : Color.secondary.opacity(0.6)).frame(width: 7, height: 7)
-                Text(LocalizedStringKey(hosting.isRunning ? "Incoming access on" : "Incoming access paused"))
-            }
-            .font(.caption).foregroundColor(.secondary)
-            .padding(.horizontal, 9).frame(height: 22)
-            .shapeBackground(Color.primary.opacity(0.05), in: Capsule())
         }
         if let release = updater.availableRelease { updateButton(release) }
         OpenSettingsButton { Image(systemName: "gearshape").font(.system(size: 14)) }

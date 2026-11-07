@@ -178,19 +178,6 @@ struct RemoteSessionView: View {
                 if agents.isActing || agents.isStoppedForSession { agentBadge }
                 PingBadge(milliseconds: model.pingMilliseconds)
                 if let size = model.remoteScreenSize { Text("\(Int(size.width)) × \(Int(size.height))").digitsMonospaced() }
-                Button {
-                    model.releaseRemoteInput(); forwardShortcuts.toggle()
-                } label: {
-                    Label(LocalizedStringKey(forwardShortcuts ? "Shortcuts: other computer" : "Shortcuts: this Mac"),
-                          systemImage: "command")
-                }
-                .buttonStyle(.borderless)
-                .help("Click to choose where ⌘ keyboard shortcuts go")
-                Button(LocalizedStringKey(model.controlEnabled ? "Keyboard & mouse enabled" : "View only · Click to control")) {
-                    model.setControlEnabled(!model.controlEnabled)
-                }
-                .buttonStyle(.borderless)
-                .disabled(model.phase != .connected || model.remoteInfo?.allowsRemoteInput != true)
             }.font(.caption).foregroundColor(.secondary).padding(.horizontal, 10).padding(.vertical, 5).barBackground()
         }
     }
