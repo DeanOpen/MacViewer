@@ -9,6 +9,8 @@ struct SessionProgressView: View {
 
     @State private var reachedStep = 0
     @State private var started = Date()
+    @State private var now = Date()
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private static let steps = [
         "Registering this Mac",
@@ -35,15 +37,16 @@ struct SessionProgressView: View {
         }
         .frame(maxWidth: 380)
         .padding(24)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(NSColor.controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
-        .onAppear { reachedStep = Self.step(for: status) ?? 0; started = Date() }
+        .onAppear { reachedStep = Self.step(for: status) ?? 0; started = Date(); now = started }
+        .onReceive(clock) { now = $0 }
         .onChange(of: status) { text in
             if let step = Self.step(for: text) { reachedStep = step }
         }
         .onChange(of: phase) { value in
-            if value == .connecting, Self.step(for: status) == 0 { reachedStep = 0; started = Date() }
+            if value == .connecting, Self.step(for: status) == 0 { reachedStep = 0; started = Date(); now = started }
         }
     }
 
@@ -53,16 +56,14 @@ struct SessionProgressView: View {
                 ProgressView().controlSize(.small)
                 Text(L("Connecting")).font(.headline)
                 Spacer()
-                TimelineView(.periodic(from: started, by: 1)) { context in
-                    Text(Self.elapsed(context.date.timeIntervalSince(started)))
-                        .font(.caption).digitsMonospaced().foregroundColor(.secondary)
-                }
+                Text(Self.elapsed(now.timeIntervalSince(started)))
+                    .font(.caption).digitsMonospaced().foregroundColor(.secondary)
             }
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Self.steps.indices, id: \.self) { index in stepRow(index) }
             }
-            TimelineView(.periodic(from: started, by: 1)) { context in
-                if context.date.timeIntervalSince(started) > 15 {
+            Group {
+                if now.timeIntervalSince(started) > 15 {
                     Label(L(reachedStep == 3
                             ? "Someone at the Windows computer needs to click Accept."
                             : "This is taking longer than usual. MacViewer keeps trying other servers."),
