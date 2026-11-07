@@ -180,6 +180,8 @@ struct App {
     transfers: HashMap<String, String>,
     partner_id: String,
     state: String,
+    /// Latest round trip to the partner, in milliseconds.
+    ping: Option<u32>,
     close_reason: Option<String>,
     window: Option<Rc<Window>>,
     surface: Option<Surface>,
@@ -307,6 +309,9 @@ impl App {
     fn update_title(&self) {
         let Some(w) = &self.window else { return };
         let mut title = format!("LinuxViewer — {} — {}", self.partner_id, self.state);
+        if let Some(ms) = self.ping {
+            title += &format!(" — ping {ms} ms");
+        }
         if self.encoder.is_some() {
             title += if self.view_only { " — view only" } else if self.control { " — Control ON" } else { " — Control OFF" };
             if self.sound {
@@ -699,6 +704,10 @@ impl App {
                     self.notify("Partner is typing…");
                 }
             }
+            ClientEvent::Latency(ms) => {
+                self.ping = Some(ms);
+                self.update_title();
+            }
             ClientEvent::Closed(reason) => {
                 self.close_reason = Some(reason);
                 self.done = true;
@@ -888,7 +897,7 @@ pub fn run_with(profile: Profile, partner_id: &str, password: &str, base: Connec
     let event_loop = EventLoop::<UiEvent>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let viewer = new_viewer(profile, partner_id, password, base, proxy.clone(), 1);
-    let mut shell = Shell { proxy, viewer: Some(viewer), launcher: None, result: None, generation: 1 };
+    let mut shell = Shell { proxy, viewers: vec![viewer], launcher: None, result: None, generation: 1 };
     event_loop.run_app(&mut shell)?;
     match shell.result {
         Some(reason) => Err(reason.into()),
@@ -902,7 +911,7 @@ pub fn run_gui() -> Result<()> {
     let event_loop = EventLoop::<UiEvent>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let launcher = Launcher::new(proxy.clone());
-    let mut shell = Shell { proxy, viewer: None, launcher: Some(launcher), result: None, generation: 0 };
+    let mut shell = Shell { proxy, viewers: Vec::new(), launcher: Some(launcher), result: None, generation: 0 };
     event_loop.run_app(&mut shell)?;
     Ok(())
 }
@@ -915,8 +924,9 @@ fn new_viewer(profile: Profile, partner_id: &str, password: &str, base: ConnectO
         session: None, pending: Some((profile, password.to_string())), proxy: Some(proxy), generation, done: false,
         clipboard: None, clipboard_sharing: false, last_clipboard: None, transfers: HashMap::new(),
         download_dir: base.download_dir.clone().unwrap_or(if downloads.is_dir() { downloads } else { home }),
-        clipboard_at_start: base.clipboard, base,
-        partner_id: partner_id.to_string(), state: "connecting…".into(), close_reason: None,
+        // Clipboard sharing starts on, as in MacViewer.
+        clipboard_at_start: true, base,
+        partner_id: partner_id.to_string(), state: "connecting…".into(), ping: None, close_reason: None,
         window: None, surface: None, control: true, view_only: false, encoder: None, origin: (0, 0),
         monitors: Vec::new(), monitor: 0, layout: None, zoom: None, title_after_draw: false, pan_focus: (0.5, 0.5), pointer: None, modifiers: ModifiersState::empty(),
         cursor: CursorState::default(), native_cursors: HashMap::new(), shown_cursor: None,
@@ -933,10 +943,11 @@ pub enum UiEvent {
     SavedPassword(String, String),
 }
 
-/// Owns the event loop's windows: the optional launcher and at most one viewer.
+/// Owns the event loop's windows: the optional launcher and one viewer window
+/// per connected computer. Every viewer stays connected on its own.
 struct Shell {
     proxy: EventLoopProxy<UiEvent>,
-    viewer: Option<App>,
+    viewers: Vec<App>,
     launcher: Option<Launcher>,
     /// Error to return from `run_with` (CLI mode).
     result: Option<String>,
@@ -945,18 +956,25 @@ struct Shell {
 
 impl Shell {
     fn reap(&mut self, event_loop: &ActiveEventLoop) {
-        if !self.viewer.as_ref().is_some_and(|v| v.done) {
-            return;
-        }
-        let mut viewer = self.viewer.take().unwrap();
-        viewer.close_session();
-        let reason = viewer.close_reason.take();
-        drop(viewer);
-        match self.launcher.as_mut() {
-            Some(l) => l.session_ended(reason),
-            None => {
-                self.result = reason;
-                event_loop.exit();
+        let mut index = 0;
+        while index < self.viewers.len() {
+            if !self.viewers[index].done {
+                index += 1;
+                continue;
+            }
+            let mut viewer = self.viewers.remove(index);
+            viewer.close_session();
+            let reason = viewer.close_reason.take();
+            let id = viewer.partner_id.clone();
+            drop(viewer);
+            match self.launcher.as_mut() {
+                Some(l) => l.session_ended(&id, reason, self.viewers.len()),
+                None => {
+                    if self.viewers.is_empty() {
+                        self.result = reason;
+                        event_loop.exit();
+                    }
+                }
             }
         }
     }
@@ -965,21 +983,29 @@ impl Shell {
         match action {
             LauncherAction::None => {}
             LauncherAction::Quit => {
-                if let Some(v) = self.viewer.as_mut() {
+                for v in &mut self.viewers {
                     v.release_all();
                     v.close_session();
                 }
                 event_loop.exit();
             }
             LauncherAction::Connect { id, password } => {
-                if self.viewer.is_some() {
+                // The same computer twice shows its window instead.
+                if let Some(v) = self.viewers.iter().find(|v| v.partner_id == id) {
+                    if let Some(w) = &v.window {
+                        w.focus_window();
+                    }
+                    if let Some(l) = self.launcher.as_mut() {
+                        l.showed_open_session(&id);
+                        l.set_open_sessions(self.viewers.len());
+                    }
                     return;
                 }
                 let profile = match Profile::load_or_create() {
                     Ok(p) => p,
                     Err(e) => {
                         if let Some(l) = self.launcher.as_mut() {
-                            l.session_ended(Some(e.to_string()));
+                            l.session_ended(&id, Some(e.to_string()), self.viewers.len());
                         }
                         return;
                     }
@@ -987,7 +1013,7 @@ impl Shell {
                 self.generation += 1;
                 let mut viewer = new_viewer(profile, &id, &password, ConnectOptions::default(), self.proxy.clone(), self.generation);
                 viewer.open(event_loop);
-                self.viewer = Some(viewer);
+                self.viewers.push(viewer);
                 self.reap(event_loop);
             }
         }
@@ -1003,7 +1029,7 @@ impl ApplicationHandler<UiEvent> for Shell {
                 return;
             }
         }
-        if let Some(v) = self.viewer.as_mut() {
+        for v in &mut self.viewers {
             if v.window.is_none() {
                 v.open(event_loop);
             }
@@ -1014,9 +1040,9 @@ impl ApplicationHandler<UiEvent> for Shell {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UiEvent) {
         match event {
             UiEvent::Client(generation, event) => {
-                let Some(v) = self.viewer.as_mut().filter(|v| v.generation == generation) else { return };
+                let Some(v) = self.viewers.iter_mut().find(|v| v.generation == generation) else { return };
                 if let Some(l) = self.launcher.as_mut() {
-                    l.client_progress(&event);
+                    l.client_progress(&v.partner_id, &event);
                 }
                 v.client_event(event_loop, event);
             }
@@ -1036,19 +1062,22 @@ impl ApplicationHandler<UiEvent> for Shell {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         event_loop.set_control_flow(ControlFlow::Wait);
-        if let Some(v) = self.viewer.as_mut() {
-            v.about_to_wait(event_loop);
+        // A viewer with a pending notice timeout goes last so its wake-up wins.
+        let mut order: Vec<usize> = (0..self.viewers.len()).collect();
+        order.sort_by_key(|&i| self.viewers[i].notice.is_some());
+        for i in order {
+            self.viewers[i].about_to_wait(event_loop);
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if let Some(v) = self.viewer.as_mut().filter(|v| v.window.as_ref().is_some_and(|w| w.id() == id)) {
+        if let Some(v) = self.viewers.iter_mut().find(|v| v.window.as_ref().is_some_and(|w| w.id() == id)) {
             v.window_event(event_loop, event);
             self.reap(event_loop);
             return;
         }
         if let Some(l) = self.launcher.as_mut().filter(|l| l.window_id() == Some(id)) {
-            let action = l.window_event(event, self.viewer.is_some());
+            let action = l.window_event(event, self.viewers.len());
             self.handle_action(event_loop, action);
         }
     }

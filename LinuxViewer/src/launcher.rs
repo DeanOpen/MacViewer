@@ -107,7 +107,8 @@ pub struct Launcher {
     /// Save the password in the keyring once a connection succeeds.
     remember: bool,
     /// ID and password of the connection in progress, saved or forgotten on Connected.
-    pending: Option<(String, String)>,
+    /// Passwords to save once their session connects, by partner ID.
+    pending: std::collections::HashMap<String, String>,
     host: Option<Host>,
     host_status: String,
     host_generation: u64,
@@ -116,7 +117,8 @@ pub struct Launcher {
     modifiers: ModifiersState,
     clipboard: Option<arboard::Clipboard>,
     /// A viewer session is open (Connect is disabled meanwhile).
-    viewer_active: bool,
+    /// Viewer windows open now; each stays connected on its own.
+    open_sessions: usize,
 }
 
 fn recents_path() -> Option<PathBuf> {
@@ -248,8 +250,8 @@ impl Launcher {
         Launcher {
             proxy, window: None, surface: None, id: recents.first().cloned().unwrap_or_default(), password: String::new(),
             focus: Widget::Id, status: "Enter your partner's ID and password.".into(), status_error: false, recents,
-            remember: true, pending: None, host: None, host_status: String::new(), host_generation: 0, hits: Vec::new(), pointer: None,
-            modifiers: ModifiersState::empty(), clipboard: None, viewer_active: false,
+            remember: true, pending: std::collections::HashMap::new(), host: None, host_status: String::new(), host_generation: 0, hits: Vec::new(), pointer: None,
+            modifiers: ModifiersState::empty(), clipboard: None, open_sessions: 0,
         }
     }
 
@@ -289,11 +291,11 @@ impl Launcher {
     }
 
     /// Mirror viewer progress (ClientEvent::Status / Connected) here.
-    pub fn client_progress(&mut self, event: &ClientEvent) {
+    pub fn client_progress(&mut self, partner_id: &str, event: &ClientEvent) {
         match event {
-            ClientEvent::Status(s) => self.set_status(s.clone(), false),
+            ClientEvent::Status(s) => self.set_status(format!("{}: {s}", group_id(partner_id)), false),
             ClientEvent::Connected { width, height } => {
-                if let Some((id, password)) = self.pending.take() {
+                if let Some((id, password)) = self.pending.remove_entry(partner_id) {
                     let remember = self.remember;
                     std::thread::spawn(move || {
                         let Some(entry) = keyring_entry(&id) else { return };
@@ -304,7 +306,7 @@ impl Launcher {
                         }
                     });
                 }
-                self.set_status(format!("Connected ({width}×{height})."), false)
+                self.set_status(format!("Connected to {} ({width}×{height}).", group_id(partner_id)), false)
             }
             _ => {}
         }
@@ -322,16 +324,26 @@ impl Launcher {
 
     pub fn saved_password(&mut self, id: String, password: String) {
         // Ignore a late answer if the user moved on or already typed a password.
-        if self.id == id && self.password.is_empty() && !self.viewer_active {
+        if self.id == id && self.password.is_empty() {
             self.password = password;
             self.remember = true;
             self.set_status("Saved password filled in.", false);
         }
     }
 
-    pub fn session_ended(&mut self, reason: Option<String>) {
-        self.viewer_active = false;
-        self.pending = None;
+    pub fn set_open_sessions(&mut self, open_sessions: usize) {
+        self.open_sessions = open_sessions;
+        self.redraw();
+    }
+
+    /// The window for `id` was already open and was brought forward.
+    pub fn showed_open_session(&mut self, id: &str) {
+        self.set_status(format!("{} is already open.", group_id(id)), false);
+    }
+
+    pub fn session_ended(&mut self, partner_id: &str, reason: Option<String>, open_sessions: usize) {
+        self.open_sessions = open_sessions;
+        self.pending.remove(partner_id);
         match reason {
             Some(r) => self.set_status(r, true),
             None => self.set_status("Session ended.", false),
@@ -343,10 +355,6 @@ impl Launcher {
 
     fn connect(&mut self) -> LauncherAction {
         let id: String = self.id.chars().filter(|c| !c.is_whitespace()).collect();
-        if self.viewer_active {
-            self.set_status("Close the open session first.", true);
-            return LauncherAction::None;
-        }
         if !valid_id(&id) {
             self.set_status("The partner ID must be digits.", true);
             self.focus = Widget::Id;
@@ -362,8 +370,8 @@ impl Launcher {
             let _ = std::fs::create_dir_all(p.parent().unwrap());
             let _ = std::fs::write(&p, self.recents.join("\n") + "\n");
         }
-        self.viewer_active = true;
-        self.pending = Some((id.clone(), self.password.clone()));
+        self.open_sessions += 1;
+        self.pending.insert(id.clone(), self.password.clone());
         self.set_status(format!("Connecting to {}…", group_id(&id)), false);
         LauncherAction::Connect { id, password: self.password.clone() }
     }
@@ -582,8 +590,8 @@ impl Launcher {
         self.redraw();
     }
 
-    pub fn window_event(&mut self, event: WindowEvent, viewer_active: bool) -> LauncherAction {
-        self.viewer_active = viewer_active;
+    pub fn window_event(&mut self, event: WindowEvent, open_sessions: usize) -> LauncherAction {
+        self.open_sessions = open_sessions;
         match event {
             WindowEvent::CloseRequested => {
                 self.stop_hosting();
@@ -703,8 +711,11 @@ impl Launcher {
             }
             bw
         };
-        let connect_label = if self.viewer_active { "Connected" } else { "Connect" };
-        button(&mut c, &mut hits, x, y, connect_label, Widget::Connect, true, !self.viewer_active);
+        let connect_label = match self.open_sessions {
+            0 => "Connect".to_string(),
+            n => format!("Connect ({n} open)"),
+        };
+        button(&mut c, &mut hits, x, y, &connect_label, Widget::Connect, true, true);
         y += field_h + 4 * s;
         let status = c.fit(&self.status, width);
         c.text(x, y, &status, if self.status_error { ERROR } else { MUTED }, k);

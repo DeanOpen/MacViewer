@@ -15,6 +15,8 @@ pub const COMMAND_HOST: &str = "functions3.ultraviewer.net";
 pub const COMMAND_PORT: u16 = 443;
 /// Deadline for the `3:` and `8:` replies (Swift armDeadline).
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long one ID server gets to answer the registration.
+pub const SERVER_REPLY_TIMEOUT: Duration = Duration::from_secs(6);
 /// frmMain.tmPingServer interval.
 pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -33,17 +35,30 @@ pub struct CommandSender {
 
 impl CommandConnection {
     /// Opens the command channel, sends registration and waits for the `3:` reply.
+    /// Some ID servers accept TLS but never answer; each resolved server gets
+    /// `SERVER_REPLY_TIMEOUT` before the next one is tried.
     pub fn register(registration: &Registration) -> Result<Self> {
         let text = registration.text()?;
-        let (mut reader, writer) = tls::open(COMMAND_HOST, COMMAND_PORT, COMMAND_HOST)?;
+        let mut last: Option<crate::wire::Error> = None;
+        for addr in tls::resolve_ipv4(COMMAND_HOST, COMMAND_PORT)? {
+            match Self::register_at(&addr.ip().to_string(), text.as_bytes()) {
+                Ok(connection) => return Ok(connection),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| "UltraViewer did not answer the registration. Check the connection and try again.".into()))
+    }
+
+    fn register_at(address: &str, text: &[u8]) -> Result<Self> {
+        let (mut reader, writer) = tls::open(address, COMMAND_PORT, COMMAND_HOST)?;
         let sender = CommandSender { writer };
-        sender.send(text.as_bytes())?;
-        let deadline = Instant::now() + REPLY_TIMEOUT;
+        sender.send(text)?;
+        let deadline = Instant::now() + SERVER_REPLY_TIMEOUT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             let Some(payload) = recv_system(&mut reader, left)? else {
                 sender.shutdown();
-                return Err("UltraViewer did not answer the registration. Check the connection and try again.".into());
+                return Err("The UltraViewer ID servers did not answer. Try again in a moment.".into());
             };
             if payload.starts_with(b"3:") {
                 let reply = messages::parse_registration_reply(&payload)?;

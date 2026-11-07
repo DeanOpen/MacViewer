@@ -131,6 +131,9 @@ pub struct Renderer {
     cache_order: Vec<i32>, // oldest first
     cache_bytes: usize,
     decoder: ZstdDecoder,
+    /// JPEG atlases that did not fit the tile walk and were left out. The rest
+    /// of their frame still applies; the caller asks for a fresh screen.
+    skipped_atlases: u64,
 }
 
 impl Renderer {
@@ -156,6 +159,7 @@ impl Renderer {
         Ok(Renderer {
             width, height, tile_size: init.tile_size as usize, last_frame_number, init: init.clone(),
             main: vec![0; width * height], temp, cache: HashMap::new(), cache_order: Vec::new(), cache_bytes: 0,
+            skipped_atlases: 0,
             decoder: ZstdDecoder::new(limits.max_decompressed_bytes, Some(SCREEN_DICTIONARY))?,
             limits,
         })
@@ -174,6 +178,10 @@ impl Renderer {
     pub fn init(&self) -> &ScreenInit {
         &self.init
     }
+    pub fn skipped_atlases(&self) -> u64 {
+        self.skipped_atlases
+    }
+
     pub fn tile_size(&self) -> usize {
         self.tile_size
     }
@@ -231,8 +239,15 @@ impl Renderer {
             None
         } else {
             let atlas = self.decode_atlas(m.auxiliary_jpeg)?;
-            let tiles = self.atlas_tiles(&atlas, &m.auxiliary_rectangles)?;
-            Some((atlas, tiles))
+            match self.atlas_tiles(&atlas, &m.auxiliary_rectangles) {
+                Ok(tiles) => Some((atlas, tiles)),
+                // Guessing another walk scrambles the screen; leave it out.
+                Err(ScreenError::AuxiliaryAtlasOutOfBounds) => {
+                    self.skipped_atlases += 1;
+                    None
+                }
+                Err(e) => return Err(e),
+            }
         };
         let mut new_hashes = HashSet::new();
         let mut budget = self.cache_bytes;
@@ -676,8 +691,9 @@ mod tests {
     #[test]
     fn auxiliary_bounds_and_tile_size_updates() {
         let mut r = renderer(5, 1, 1);
-        assert_eq!(apply(&mut r, &P { jpeg: jpeg(), aux: vec![0, 0, 5, 1], ..P::seq(1) }), Err(ScreenError::AuxiliaryAtlasOutOfBounds));
-        assert_eq!(r.last_frame_number(), 0);
+        // An atlas that does not fit is skipped; the frame still applies.
+        assert!(apply(&mut r, &P { jpeg: jpeg(), aux: vec![0, 0, 5, 1], ..P::seq(1) }).is_ok());
+        assert_eq!((r.skipped_atlases(), r.last_frame_number()), (1, 1));
         r.set_tile_size(&[&[48], &[2]]).unwrap();
         assert_eq!(r.tile_size(), 2);
         assert!(r.set_tile_size(&[&[48], &[0]]).is_err());

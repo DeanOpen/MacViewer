@@ -27,7 +27,10 @@ use std::time::{Duration, Instant};
 
 const HEARTBEAT: Duration = Duration::from_secs(10);
 /// Swift armDeadline: login/initialization must finish within 20 s.
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
+/// Shortest gap between screen refreshes caused by undecodable updates.
+const DAMAGE_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+/// Someone at the partner computer may need time to click Accept.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_RELAY_HOST: &str = "functions3.ultraviewer.net";
 /// The Login message's local screen size when the caller has none (headless).
 pub const DEFAULT_LOCAL_SCREEN: (u32, u32) = (1920, 1080);
@@ -66,6 +69,8 @@ pub enum ClientEvent {
     Clipboard(String),
     /// File offers, progress, completion and failures (13-16, 21).
     File(files::Event),
+    /// Round trip of the latest peer ping (20), in milliseconds.
+    Latency(u32),
     Closed(String),
 }
 
@@ -108,6 +113,8 @@ struct Shared {
     /// The selected LAN-direct channel; when set, all peer traffic uses it.
     direct: Mutex<Option<DirectWriter>>,
     relay_ready: AtomicBool,
+    /// When the unanswered peer ping was sent.
+    ping_sent: Mutex<Option<Instant>>,
 }
 
 #[derive(Clone)]
@@ -193,6 +200,7 @@ pub fn connect_with(profile: &Profile, partner_id: &str, password: &str, options
         local_id: String::new(),
         peer: None,
         refreshes: 0,
+        last_damage_refresh: None,
         accepted: false,
         options,
         lan: LanState::default(),
@@ -337,6 +345,7 @@ struct Run {
     local_id: String,
     peer: Option<PeerInfo>,
     refreshes: u32,
+    last_damage_refresh: Option<Instant>,
     accepted: bool,
     options: ConnectOptions,
     lan: LanState,
@@ -682,7 +691,8 @@ impl Run {
         let shared = self.shared.clone();
         thread::spawn(move || {
             let mut ticks = 0u32;
-            let mut next = Instant::now() + HEARTBEAT;
+            // The first ping comes soon so the latency shows right away.
+            let mut next = Instant::now() + Duration::from_secs(2);
             while !shared.closed.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(250));
                 if Instant::now() < next {
@@ -699,6 +709,7 @@ impl Run {
                         link.writer.shutdown();
                     }
                 }
+                *shared.ping_sent.lock().unwrap() = Some(Instant::now());
                 if shared.send_peer(b"20").is_err() {
                     match shared.direct.lock().unwrap().as_ref() {
                         Some(d) => d.shutdown(),
@@ -776,6 +787,12 @@ impl Run {
         match command {
             0 => self.initialize(parts, upgrading)?,
             1 if active => self.frame(parts)?,
+            20 => {
+                if let Some(sent) = self.shared.ping_sent.lock().unwrap().take() {
+                    let ms = sent.elapsed().as_millis().min(u32::MAX as u128) as u32;
+                    (self.notify)(ClientEvent::Latency(ms));
+                }
+            }
             48 if active => {
                 if let Some(r) = self.screen.lock().unwrap().as_mut() {
                     r.set_tile_size(parts)?;
@@ -861,6 +878,18 @@ impl Run {
         Ok(())
     }
 
+    fn refresh_after_damage(&mut self) -> Result<()> {
+        if self.last_damage_refresh.is_some_and(|t| t.elapsed() < DAMAGE_REFRESH_INTERVAL) {
+            return Ok(());
+        }
+        self.last_damage_refresh = Some(Instant::now());
+        self.refreshes += 1;
+        self.shared.active.store(false, Ordering::SeqCst);
+        *self.screen.lock().unwrap() = None;
+        self.status("Refreshing the remote screen…");
+        self.login(-1, true)
+    }
+
     fn initialize(&mut self, parts: &[&[u8]], upgrading: Option<u64>) -> Result<()> {
         let init = screen::parse_init(parts)?;
         let version = init.version();
@@ -918,24 +947,25 @@ impl Run {
 
     fn frame(&mut self, parts: &[&[u8]]) -> Result<()> {
         let applied = match self.screen.lock().unwrap().as_mut() {
-            Some(r) => r.apply(parts),
+            Some(r) => {
+                let skipped = r.skipped_atlases();
+                r.apply(parts).map(|()| r.skipped_atlases() != skipped)
+            }
             None => return Ok(()),
         };
         // Backpressure follows decoding, so the host never runs ahead of us.
         self.shared.send_peer(b"18")?;
         match applied {
-            Ok(()) => (self.notify)(ClientEvent::FrameReady),
-            Err(e) => {
-                // A damaged cache must not continue: ask for a full screen again.
-                if self.refreshes >= 2 {
-                    return Err(format!("The remote screen could not be decoded: {e}").into());
+            Ok(skipped) => {
+                (self.notify)(ClientEvent::FrameReady);
+                // A left-out atlas leaves stale tiles; repaint them soon.
+                if skipped {
+                    self.refresh_after_damage()?;
                 }
-                self.refreshes += 1;
-                self.shared.active.store(false, Ordering::SeqCst);
-                *self.screen.lock().unwrap() = None;
-                self.status("Refreshing the remote screen…");
-                self.login(-1, true)?;
             }
+            // A damaged cache must not continue. Never end the session for it:
+            // drop the screen and ask for a full one, at most every 10 s.
+            Err(_) => self.refresh_after_damage()?,
         }
         Ok(())
     }

@@ -171,6 +171,7 @@ fn next_event(s: &Session, timeout: Duration) -> Option<String> {
             files::Event::Canceled(id) => format!("filecanceled\t{id}"),
             files::Event::Failed(id, reason) => format!("filefailed\t{id}\t{reason}"),
         },
+        ClientEvent::Latency(ms) => format!("latency\t{ms}"),
         ClientEvent::Closed(reason) => format!("closed\t{reason}"),
     })
 }
